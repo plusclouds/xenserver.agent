@@ -76,12 +76,12 @@ func Connect(cfg config.NATSConfig, agentUUID, agentAPIKey string, logger *zap.L
 
 // CmdSubject returns the subject the agent subscribes to for inbound commands.
 func (c *Client) CmdSubject() string {
-	return "agent.vm." + c.agentUUID + ".cmd"
+	return "agent.compute." + c.agentUUID + ".cmd"
 }
 
 // EvtSubject returns the subject the agent publishes events to.
 func (c *Client) EvtSubject() string {
-	return "agent.vm." + c.agentUUID + ".evt"
+	return "agent.compute." + c.agentUUID + ".evt"
 }
 
 // TelemetrySubject returns the client-facing telemetry subject captured by

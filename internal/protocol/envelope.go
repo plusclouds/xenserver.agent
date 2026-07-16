@@ -17,6 +17,7 @@ const (
 	TypeDiskHealth   = "disk_health"
 	TypeAlert        = "alert"
 	TypeIPMI         = "ipmi"
+	TypeXAPIEvent    = "xapi_event"
 	TypeResult       = "result"
 	TypeCapabilities = "capabilities"
 )
@@ -65,6 +66,26 @@ type HeartbeatPayload struct {
 	TasksQueued int    `json:"tasks_queued"`
 }
 
+// IPMIPayload is the payload shape for ipmi events (a full sensor-table
+// snapshot). Sensors is typed any rather than a concrete struct so this
+// low-level package doesn't need to depend on internal/modules/xenserver,
+// which owns the actual sensor-reading shape.
+type IPMIPayload struct {
+	Hostname string `json:"hostname"`
+	Sensors  any    `json:"sensors"`
+}
+
+// XAPIEventPayload is the payload shape for xapi_event messages — one XAPI
+// object-change notification (VM/SR/VBD/host/... state change), replacing
+// the events.py sidecar script's REST push of session.xenapi.event_from.
+type XAPIEventPayload struct {
+	Hostname  string          `json:"hostname"`
+	Class     string          `json:"class"`
+	UUID      string          `json:"uuid"`
+	Operation string          `json:"operation"`
+	Snapshot  json.RawMessage `json:"snapshot,omitempty"`
+}
+
 // OperationParam describes a single parameter accepted by an operation.
 type OperationParam struct {
 	Name        string `json:"name"`
@@ -99,7 +120,7 @@ func New(agentUUID, msgType string, payload any) (Envelope, error) {
 		V:         1,
 		ID:        newUUID(),
 		Type:      msgType,
-		AgentType: "vm",
+		AgentType: "compute",
 		AgentUUID: agentUUID,
 		Timestamp: time.Now().Unix(),
 		Payload:   raw,
