@@ -177,9 +177,11 @@ Response to a command. The `command_id` matches the `id` from the originating co
 }
 ```
 
-`status` values: `completed`, `failed`, `rejected`.
+`status` values: `completed`, `failed`, `rejected`, `accepted`.
 
-`rejected` means the agent refused the command (e.g. unsupported operation, precondition not met). `failed` means it tried and encountered an error. `completed` means success.
+`rejected` means the agent refused the command (operation not in `allowed_operations`, invalid parameters, a destructive call without `confirm`). `failed` means it tried and encountered an error. `completed` means it ran; for XenServer operations also check `output.success`, which carries the operation's own outcome. `accepted` means a long operation was started in the background: `output` holds the job (`job_id`, `status`, `progress`); poll it with `agent.job.status`. Over HTTPS `accepted` is returned with HTTP 202.
+
+Results are returned the same way on both transports: on NATS as a `result` message on the event subject, on HTTPS as the response body of `POST /v1/command`.
 
 ---
 
@@ -194,20 +196,17 @@ The envelope `type` is always `"command"`. The `id` field becomes the `command_i
   "v": 1,
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "type": "command",
-  "agent_type": "storage",
+  "agent_type": "compute",
   "agent_uuid": "550e8400-e29b-41d4-a716-446655440001",
   "timestamp": 1748000000,
   "payload": {
-    "operation": "create_nfs_export",
-    "params": {
-      "path":    "/mnt/vol1",
-      "clients": ["10.0.0.0/8"],
-      "options": ["rw", "no_root_squash"]
-    },
-    "timeout_s": 300
+    "operation": "xenserver.vm.snapshot_create",
+    "params": { "uuid": "<vm-uuid>", "label": "before-upgrade" }
   }
 }
 ```
+
+Operations and their parameters are listed in [operations.md](operations.md). The same envelope is accepted over HTTPS at `POST /v1/command` (see [https-api.md](https-api.md)).
 
 `timeout_s` is advisory — the agent should abandon the operation and send a `failed` result if it cannot complete within this many seconds.
 

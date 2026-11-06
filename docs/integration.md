@@ -1,5 +1,7 @@
 # PlusClouds Agent Integration Guide
 
+> **Partly outdated.** The ISO config drive provisioning described here is still current, but endpoints and REST calls to `/api/v1/...` belong to the earlier REST design and no longer exist. For controlling the agent today, see the [README](../README.md), [https-api.md](https-api.md) and [operations.md](operations.md).
+
 This guide is for the PlusClouds orchestration/provisioning team. It covers
 everything needed to provision VMs with the agent, integrate with the control
 plane, and manage VMs remotely via the agent API.

@@ -305,7 +305,7 @@ func orUnknown(s string) string {
 }
 
 // hostReasons extracts the per-host lines from xe's "no suitable hosts" table
-// (e.g. "rcell2s1 : Cannot start here [Host cannot attach to network ...]").
+// (e.g. "host1 : Cannot start here [Host cannot attach to network ...]").
 func hostReasons(stdout string) string {
 	var out []string
 	for _, l := range strings.Split(stdout, "\n") {

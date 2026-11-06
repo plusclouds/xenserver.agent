@@ -13,7 +13,7 @@ nats:
   enabled: false
 
   # Agent identity — returned by /healthz and stamped on result envelopes.
-  agent_uuid: "d6199047-322a-4845-bdea-1d44dd1b49e5"
+  agent_uuid: "00000000-0000-0000-0000-000000000000"
 
   # Not used for authentication in HTTPS-only mode (see http.api_key below).
   # Only a fallback bearer token if http.api_key is left empty.
@@ -25,7 +25,7 @@ nats:
 # Same allowed_operations allowlist applies as for NATS.
 http:
   enabled: false
-  listen: "10.1.32.70:8443"
+  listen: "0.0.0.0:8443"            # use a specific management IP where possible
   # With self_signed: true, a cert is generated at these paths on first start
   # and reused (renewed 30 days before expiry). Existing certs are never overwritten.
   cert_file: /var/lib/plusclouds/tls/agent.crt
@@ -37,7 +37,7 @@ http:
   # Extra DNS names / IPs for the self-signed cert SANs (hostname, localhost and
   # local interface IPs are added automatically).
   hosts:
-    - 10.1.32.70
+    - agent.example.com        # DNS names or IPs clients will use
 
 agent:
   heartbeat_interval: 30s

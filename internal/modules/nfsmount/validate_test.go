@@ -4,7 +4,7 @@ import "testing"
 
 func TestValidateMountArgs(t *testing.T) {
 	good := [][4]string{
-		{"10.1.32.180", "/storage", "/mnt/x", ""},
+		{"192.0.2.10", "/storage", "/mnt/x", ""},
 		{"nas.example.com", "/a/b", "/mnt/y", "vers=3,soft,timeo=100"},
 		{"fe80::1", "/e", "/mnt/z", "ro"},
 	}

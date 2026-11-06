@@ -2,9 +2,14 @@
 
 > **The foundation that thinks.**
 
-The PlusClouds VM Agent is a lightweight, production-grade daemon that turns any Linux or Windows machine into an intelligent infrastructure node. It connects to the PlusClouds platform over NATS, streams real-time telemetry, executes remote commands, and announces its own capabilities — so your platform always knows exactly what each machine can do.
+The PlusClouds VM Agent is a lightweight daemon that turns a Linux or Windows machine into a managed infrastructure node. It executes allow-listed operations on request, reports telemetry, and describes its own capabilities. It was built to manage **XenServer / XCP-ng hypervisors** (VMs, disks, networks, storage, backups) and also manages ordinary Linux hosts (services, system info, updates).
 
-No REST API. No open ports. No certificates to manage. Just a single binary, a config file, and a secure WebSocket connection to the platform.
+It speaks two transports, either or both:
+
+- **NATS** (outbound-only WebSocket/TCP): the platform pushes commands and receives telemetry, heartbeat and events. No inbound port.
+- **HTTPS** (optional): `POST /v1/command` with a bearer token and a self-signed or provided certificate. Use it to drive the agent directly, with no message bus.
+
+Both transports use the same command envelope, the same operation allowlist and the same result format.
 
 ---
 
@@ -12,44 +17,93 @@ No REST API. No open ports. No certificates to manage. Just a single binary, a c
 
 | Capability | Description |
 |---|---|
-| **Real-time telemetry** | CPU, memory, disk I/O, and network metrics pushed every 30 seconds |
-| **Remote command execution** | Service management, system updates, and custom operations triggered from the platform |
-| **Capability discovery** | On boot the agent publishes its full operation schema — the platform always knows what it can do |
-| **Heartbeat** | Keeps the `is_alive` status current on the platform every 30 seconds |
-| **Cross-platform** | Single codebase, two binaries: Linux (systemd/D-Bus) and Windows (SCM stub) |
-| **Zero open ports** | Outbound-only NATS WebSocket connection — no inbound firewall rules needed |
+| **Hypervisor management** | XenServer/XCP-ng VMs, disks, network cards, networks, VLANs, storage repositories, ISO/CD, memory and CPU settings, power control |
+| **Backups** | Snapshots, snapshot/VM/disk export, import, copy, clone, restore; background jobs with progress and cancel ([docs/backups.md](docs/backups.md)) |
+| **Remote command execution** | Service management, system updates and allow-listed commands |
+| **Telemetry** | CPU, memory, disk I/O and network every 30 s over NATS; IPMI sensors and per-VM RRD performance on demand or pushed |
+| **Capability discovery** | The agent publishes its full operation schema; `docs/operations.md` is generated from it |
+| **Safe by default** | Per-operation allowlist, `confirm` required for destructive operations, secrets masked, dry-run mode |
+| **Cross-platform** | Linux (systemd/D-Bus, XenServer Dom0) and Windows (service-management stub) |
+
+---
+
+## Quick start (HTTPS)
+
+1. Copy the binary and the sample config to the host (the hypervisor's Dom0 for XenServer features):
+
+   ```bash
+   scp bin/plusclouds.linux root@<host>:/usr/local/bin/plusclouds-agent
+   ssh root@<host> 'chmod +x /usr/local/bin/plusclouds-agent && mkdir -p /etc/plusclouds /var/log/plusclouds'
+   scp configs/agent.https.yaml root@<host>:/etc/plusclouds/agent.yaml
+   ```
+
+2. Edit `/etc/plusclouds/agent.yaml`: set `http.enabled: true`, `http.listen`, `http.hosts` and a long random `http.api_key` (`openssl rand -base64 48`). The agent refuses to start with a key shorter than 32 characters or the `CHANGE_ME` placeholder. Enable only the operations you need under `allowed_operations`.
+
+3. Install the service and start it:
+
+   ```bash
+   scp systemd/plusclouds-agent.service root@<host>:/etc/systemd/system/
+   ssh root@<host> 'systemctl daemon-reload && systemctl enable --now plusclouds-agent'
+   ```
+
+4. Call it. On first start the agent logs the certificate SHA-256 fingerprint; pin it on the client.
+
+   ```bash
+   curl -sk https://<host>:8443/healthz
+
+   curl -sk https://<host>:8443/v1/command \
+     -H "Authorization: Bearer $AGENT_API_KEY" \
+     -d '{"v":1,"id":"1","type":"command","payload":{"operation":"xenserver.vm.list","params":{}}}'
+   ```
+
+See [docs/https-api.md](docs/https-api.md) for the full HTTPS guide (envelope, results, errors, async jobs, examples).
 
 ---
 
 ## Architecture
 
-The agent communicates exclusively over NATS. It subscribes to its own command subject and publishes events to its own event subject.
+```
+            ┌────────────── platform / your tooling ──────────────┐
+            │                                                     │
+   NATS  agent.{type}.{uuid}.cmd  ↓        ↑  .evt (results, telemetry, heartbeat, events)
+   HTTPS POST /v1/command         ↓        ↑  HTTP response (result envelope)
+            │                                                     │
+            └──────────────────────┬──────────────────────────────┘
+                                   ▼
+                     ┌──────────── dispatcher ────────────┐
+                     │ allowlist · confirm · param checks │
+                     └─┬────────┬─────────┬────────┬──────┘
+                       ▼        ▼         ▼        ▼
+                  xenserver  openvswitch nfsmount services/system
+                  (xe, xapi)  (ovs-*)    (mount)   (systemd, /proc)
+```
+
+Over NATS the agent subscribes to its own command subject and publishes to its own event subject:
 
 ```
-agent.vm.{uuid}.cmd   ←  platform sends commands
-agent.vm.{uuid}.evt   →  agent sends telemetry, heartbeat, capabilities, results
-vm.{uuid}.telemetry   →  client-facing telemetry stream (VM_TELEMETRY JetStream, 15-min retention)
+agent.{type}.{uuid}.cmd   ←  platform sends commands
+agent.{type}.{uuid}.evt   →  agent sends telemetry, heartbeat, capabilities, results
 ```
 
-Authentication uses the `agent_api_key` from `agent.yaml` (written by the platform during provisioning). The NATS auth callout validates every connection against the platform database and issues a scoped JWT — no static passwords, no shared secrets.
+NATS authentication uses the agent's API key (written by the platform during provisioning); an auth callout issues a scoped JWT. HTTPS authentication is a static bearer token configured in `http.api_key`.
 
 ### Message envelope
 
-Every NATS message in either direction shares a common JSON envelope:
+Every message in either direction, on either transport, shares one JSON envelope:
 
 ```json
 {
   "v":          1,
   "id":         "550e8400-e29b-41d4-a716-446655440000",
-  "type":       "command|telemetry|heartbeat|capabilities|result|...",
-  "agent_type": "vm",
+  "type":       "command",
+  "agent_type": "compute",
   "agent_uuid": "550e8400-e29b-41d4-a716-446655440001",
   "timestamp":  1748000000,
-  "payload":    {}
+  "payload":    { "operation": "xenserver.vm.list", "params": {} }
 }
 ```
 
-See [docs/protocol.md](docs/protocol.md) for the full payload schema for every event type.
+See [docs/protocol.md](docs/protocol.md) for every payload type and the result format.
 
 ---
 
@@ -95,136 +149,76 @@ Disk I/O rates are calculated as a delta between consecutive snapshots — the f
 
 ## Supported operations
 
-The agent announces its available operations on boot via a `capabilities` event. The platform can also request a fresh capabilities list at any time by sending `agent.allowed_operations`.
+The generated reference, [docs/operations.md](docs/operations.md), lists every operation with its parameters and description, straight from the agent's own catalog. The groups below summarise it.
 
-| Operation | Description | Parameters |
-|---|---|---|
-| `agent.allowed_operations` | Re-publish the capabilities list | — |
-| `services.list` | List all loaded systemd services | — |
-| `services.get` | Get status of a single service | `name` (string) |
-| `services.start` | Start a service | `name` (string) |
-| `services.stop` | Stop a service | `name` (string) |
-| `services.restart` | Restart a service | `name` (string) |
-| `services.reload` | Reload a service | `name` (string) |
-| `services.enable` | Enable a service on boot | `name` (string) |
-| `services.disable` | Disable a service on boot | `name` (string) |
-| `system.info` | Hostname, OS, kernel, uptime | — |
-| `system.metrics` | Full resource snapshot | — |
-| `system.cpu` | CPU usage + per-core breakdown | — |
-| `system.memory` | RAM utilisation | — |
-| `system.disk` | Disk usage + I/O rates | — |
-| `system.network` | Network interface counters | — |
-| `system.update` | `apt-get update && upgrade -y` | — (Ubuntu/Debian only) |
-| `telemetry.set_interval` | Change telemetry push interval | `interval_s` (integer, min 5) |
-| `vm.reboot` | Reboot the machine | — |
-| `vm.shutdown` | Shut down the machine | — |
-| `exec` | Run an allowed binary | `command` (string), `args` (array) |
-| `xenserver.pool.info` | Resource pool record | — |
-| `xenserver.host.list` | List hosts in the pool | — |
-| `xenserver.host.info` | Detailed record for this host | — |
-| `xenserver.vm.list` | List guest VMs on the pool | — |
-| `xenserver.vm.get` | Detailed record for one VM | `uuid` or `name` |
-| `xenserver.vm.snapshot_list` | List a VM's snapshots | `uuid` or `name` |
-| `xenserver.sr.list` | List storage repositories | — |
-| `xenserver.sr.get` | Detailed SR record | `uuid` or `name` |
-| `xenserver.network.list` | List xapi networks (OVS bridges) | — |
-| `xenserver.vif.list` | List a VM's virtual network interfaces | `uuid` or `name` |
-| `xenserver.vm.disk_list` | List a VM's disks/CD drives by position (`0` = first disk) with VDI uuid, name, size, SR | `uuid` or `name` |
-| `xenserver.vdi.list` | List virtual disk images | `sr_uuid` (optional filter) |
-| `xenserver.ipmi.sensors` | Read the current IPMI sensor table | — |
-| `xenserver.metrics.rrd` | Latest XAPI RRD utilisation snapshot (host + every VM) | — |
-| `xenserver.vm.start` | Start a stopped VM | `uuid` or `name` |
-| `xenserver.vm.shutdown` | Clean ACPI shutdown of a VM | `uuid` or `name` |
-| `xenserver.vm.reboot` | Clean reboot of a VM | `uuid` or `name` |
-| `xenserver.vm.force_shutdown` | Hard power-off (no guest cooperation; no data flush) | `uuid` or `name` |
-| `xenserver.vm.force_reboot` | Hard reboot (no guest cooperation; no data flush) | `uuid` or `name` |
-| `xenserver.vm.suspend` | Suspend a VM to disk | `uuid` or `name` |
-| `xenserver.vm.resume` | Resume a suspended VM | `uuid` or `name` |
-| `xenserver.vm.snapshot_create` | Take a VM snapshot | `uuid`/`name`, `label` |
-| `xenserver.vm.param_set` | Set allowlisted VM params: `name-label`, `name-description`, `VCPUs-max`, `VCPUs-at-startup`, `platform:<k>`, `xenstore-data:<k>`, `other-config:<k>` (keys outside the list rejected; returns applied list) | `uuid`/`name`, `set` (object), `unset` (array of map entries) |
-| `xenserver.vm.param_get` | Read one VM parameter or one map key | `uuid`/`name`, `param`, `param_key` |
-| `xenserver.vm.param_list` | All VM parameters: scalars, maps as objects, sets as arrays | `uuid`/`name` |
-| `xenserver.vm.memory_limits_set` | Set the four memory limits in bytes (halted VM) | `uuid`/`name`, `static_min`, `static_max`, `dynamic_min`, `dynamic_max` |
-| `xenserver.vm.console_list` | List consoles (uuid, protocol, location) | `uuid`/`name` |
-| `xenserver.vm.create` | Create a VM, optionally from a template (async-capable); returns `data.uuid` | `new_name`, `description`, `template`, `sr_uuid` |
-| `xenserver.vm.clone` | Clone a VM (async-capable); returns `data.uuid` | `uuid`/`name`, `new_name`, `description` |
-| `xenserver.vm.destroy` | Delete a halted VM record (irreversible; disks stay) | `uuid`/`name`, `confirm: true` |
-| `xenserver.vm.pause` / `xenserver.vm.unpause` | Pause / unpause a VM | `uuid`/`name` |
-| `xenserver.vdi.create` | Create a disk on an SR; returns `data.uuid` | `sr_uuid`, `new_name`, `size_bytes`, `description`, `type`, `sharable`, `read_only` |
-| `xenserver.vdi.destroy` | Permanently delete a disk (irreversible; refused while attached) | `vdi_uuid`, `confirm: true` |
-| `xenserver.vdi.param_list` | All disk parameters (scalars, maps, sets) | `vdi_uuid` |
-| `xenserver.vbd.create` | Attach a disk to a VM (unplugged); returns `data.uuid` | `uuid`/`name`, `vdi_uuid`, `device`, `mode`, `type`, `bootable` |
-| `xenserver.vbd.plug` / `unplug` | Hot-attach / hot-detach a VBD on a running VM | `vbd_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vbd.destroy` | Remove a disk's attachment (disk stays) | `vbd_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vbd.param_list` | All VBD parameters | `vbd_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vm.cd_list` | List a VM's CD drives and ISOs | `uuid`/`name` |
-| `xenserver.vm.cd_add` / `cd_insert` / `cd_eject` / `cd_remove` | CD drive operations by ISO name | `uuid`/`name`, `cd_name`, `device` |
-| `xenserver.vif.create` | Add a network card to a VM; returns `data.uuid` | `uuid`/`name`, `device`, `network_uuid`/`network_name`, `mac`, `mtu` |
-| `xenserver.vif.param_list` | All card parameters | `vif_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vif.param_set` | Rate limit (`qos_algorithm_type`, `qos_algorithm_params:kbps`), `other-config:*`, `locking-mode`, `ipv4-allowed`, `ipv6-allowed`, `MAC` (recreates the card) | selector, `set` |
-| `xenserver.network.create` / `destroy` / `param_list` | Create (returns `data.uuid`), delete (`confirm: true`) or inspect a network | `new_name`, `description`, `mtu` / `uuid`, `confirm` |
-| `xenserver.vlan.list` / `create` / `destroy` / `param_list` | List (optional `tag`), create (`pif_uuid`, `network_uuid`, `tag`), delete (`confirm: true`), inspect VLANs | see schema |
-| `xenserver.pif.list` / `param_list` / `param_get` / `unplug` | List interfaces (filters `vlan`, `network_uuid`, `host_uuid`), inspect, read one parameter, take down (`confirm: true`; management interface refused) | see schema |
-| `xenserver.pbd.list` / `param_list` | SR attachments (secrets masked) | `sr_uuid`, `host_uuid` / `uuid` |
-| `xenserver.task.list` | List xapi tasks | — |
-| `xenserver.sr.scan` | Rescan an SR (async-capable) | `uuid`/`name` |
-| `xenserver.sr.param_list` / `param_get` | SR parameters | `uuid`/`name`, `param`, `param_key` |
-| `xenserver.host.param_list` | Host parameters (default: this host) | `uuid` |
-| `xenserver.vm.snapshot_promote` | Turn a snapshot into a VM in place | `uuid`, `new_name` |
-| Filters | `vm.list`: `name_label`, `is_control_domain`, `is_a_template`, `fields`; `sr.list`: `type`, `name_label`, `content_type`; `network.list`: `name_label`, `bridge`, `pif_uuid` | |
-| `xenserver.vm.promote_template` | Turn a template into a VM in place (restoring a snapshot export imports a template) | `uuid` or `name`, `new_name` |
-| `xenserver.vm.snapshot_export` | Export a snapshot as a .xva image (refuses to overwrite; reports size/duration) | `uuid` or `name`, `filename` (absolute path) |
-| `xenserver.vm.snapshot_delete` | Destroy a snapshot | `uuid` (the snapshot's own uuid) |
-| `xenserver.sr.create` | Introduce a new SR | `name`, `type`, `shared`, `content_type`, `host_uuid`, `device_config` |
-| `xenserver.sr.remove` | Safely detach an SR (data preserved) | `uuid` or `name` |
-| `xenserver.sr.set_default` | Make an SR the pool's primary storage (default/suspend/crash-dump SR) | `uuid` or `name` |
-| `xenserver.vif.set_network` | Move a VM's network card to another network (recreates the VIF keeping device/MAC/MTU/locking; rolls back on failure; VM halted) | `network_uuid` or `network_name`, `vif_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vif.remove` | Delete a VM's network card (VM halted or VIF unplugged); returns the removed device/MAC/network | `vif_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vif.set_acl` | Set native VIF anti-spoofing/allowlist ACL | `vif_uuid` or (`uuid`/`name` + `device`), `locking_mode`, `ipv4_allowed`, `ipv6_allowed` |
-| `xenserver.vm.import` | Import a VM from a local file | `filename`, `sr_uuid`, `preserve` |
-| `xenserver.vm.export` | Export a whole VM to a local `.xva` | `uuid`/`name`, `filename`, `compress` |
-| `xenserver.vdi.copy` | Copy a VDI's data to another SR | `vdi_uuid`, `sr_uuid` |
-| `xenserver.vdi.resize` | Grow a VDI (never shrinks); by `vdi_uuid` or VM `uuid`/`name` + disk position `device` | `size_bytes`, `vdi_uuid` or (`uuid`/`name` + `device`) |
-| `xenserver.vdi.clone` | Fast copy-on-write VDI clone (same SR) | `vdi_uuid` |
-| `xenserver.vdi.export` | Export a single VDI's raw disk content | `vdi_uuid`, `filename`, `format` |
-| `openvswitch.bridge.list` | List OVS bridges | — |
-| `openvswitch.port.list` | List ports on a bridge | `bridge` |
-| `openvswitch.flow.list` | Dump a bridge's raw flow table | `bridge` |
-| `openvswitch.vxlan.create` | Add a VXLAN encapsulation port | `bridge` or `network_uuid`, `port_name`, `remote_ip`, `local_ip`, `vni` |
-| `openvswitch.vxlan.remove` | Remove a VXLAN port | `bridge`, `port_name` |
-| `openvswitch.flow.add` | Install a raw OVS flow rule | `bridge`, `flow_spec` |
-| `openvswitch.flow.remove` | Remove matching OVS flow rules | `bridge`, `match_spec` |
-| `agent.job.status` | Status/progress of a background job (`running`/`completed`/`failed`/`cancelled`, elapsed, bytes done/estimated total, final result) | `job_id` |
-| `agent.job.list` | List background jobs, newest first | — |
-| `agent.job.cancel` | Cancel a running job (half-written export removed) | `job_id` |
-| `nfsmount.list` | List currently-mounted NFS filesystems | — |
-| `nfsmount.list_files` | List files directly under a mounted NFS mount point (image repository browser; not recursive) | `mount_point`, `suffix`, `sort_by` (name/size/mtime), `descending`, `limit` |
-| `nfsmount.mount` | Mount an NFS export | `server`, `export_path`, `mount_point`, `mount_options` |
-| `nfsmount.unmount` | Unmount an NFS filesystem | `mount_point` |
+| Group | Operations (prefix `xenserver.` unless noted) |
+|---|---|
+| **Agent / system** | `agent.allowed_operations`, `agent.job.status/list/cancel`, `system.info/metrics/cpu/memory/disk/network/update`, `telemetry.set_interval`, `vm.reboot`, `vm.shutdown` (the agent's own host), `exec` |
+| **Services** (systemd) | `services.list/get/start/stop/restart/reload/enable/disable` |
+| **Inventory** | `pool.info`, `host.list/info/param_list`, `vm.list/get/disk_list/console_list/snapshot_list`, `sr.list/get`, `vdi.list`, `network.list`, `vif.list`, `pif.list`, `pbd.list`, `vlan.list`, `task.list` |
+| **VM lifecycle** | `vm.start/shutdown/reboot/force_shutdown/force_reboot/suspend/resume/pause/unpause`, `vm.create/clone/destroy`, `vm.param_set/param_get/param_list`, `vm.memory_limits_set` |
+| **Disks** | `vdi.create/destroy/resize/clone/copy/export/param_list`, `vbd.create/plug/unplug/destroy/param_list`, `vm.cd_list/cd_add/cd_insert/cd_eject/cd_remove` |
+| **Network cards and networks** | `vif.create/plug/unplug/remove/set_network/set_acl/param_set/param_list`, `network.create/destroy/param_list`, `vlan.create/destroy/param_list`, `pif.unplug/param_list/param_get` |
+| **Storage** | `sr.create/remove/scan/set_default/param_list/param_get`, `pbd.param_list`, `nfsmount.mount/unmount/list/list_files` |
+| **Backup and restore** | `vm.snapshot_create/snapshot_delete/snapshot_promote/snapshot_export`, `vm.export/import`, `vm.promote_template`, `vdi.export/copy/clone` |
+| **Performance** | `ipmi.sensors`, `metrics.rrd` |
+| **Open vSwitch** | `openvswitch.bridge.list`, `port.list`, `flow.list`, `vxlan.create/remove`, `flow.add/remove` |
 
-All operations are opt-in. Remove any entry from `allowed_operations` in `agent.yaml` and the platform receives a `rejected` result instead of executing it.
+Notes that apply across the board:
+
+- **Everything is opt-in.** An operation that is not in `allowed_operations` returns `rejected`. Read-only operations are enabled in the sample configs; state-changing ones ship commented out.
+- **Destructive operations require `confirm: true`** (for example `vm.destroy`, `vdi.destroy`, `network.destroy`, `pif.unplug`).
+- **VM and SR selection** accepts either `uuid` or `name` (a name-label). `uuid` wins when both are given; a `name` must match exactly one object.
+- **Secrets are masked** in logs and in parameter listings (SR device-config, `xenstore-data`, anything named password, secret or token).
+- **Errors are readable.** Failures return a plain-English `message` plus structured `detail` (command, exit code, stderr). See [docs/https-api.md](docs/https-api.md#errors).
 
 ### XenServer/XCP-ng hypervisor management
 
-The `xenserver.*`, `openvswitch.*`, and `nfsmount.*` operations manage the **hypervisor itself** (Dom0), not the machine the agent runs on — distinct from `vm.reboot`/`vm.shutdown`, which power-cycle the agent's own host. They require the agent to run as root on a XenServer/XCP-ng Dom0 with the `xe`, `ovs-vsctl`, and `ovs-ofctl` binaries available.
+The `xenserver.*`, `openvswitch.*` and `nfsmount.*` operations manage the **hypervisor itself** (Dom0), not the machine the agent runs on. This is distinct from `vm.reboot`/`vm.shutdown`, which power-cycle the agent's own host. They require the agent to run as root on a XenServer/XCP-ng Dom0 with `xe`, `ovs-vsctl` and `ovs-ofctl` available. Tested against XenServer 8.2.
 
-A few operational notes:
+- **VXLAN** (`openvswitch.vxlan.*`) uses direct `ovs-vsctl` commands rather than xapi's tunnel object, whose VXLAN support is version-dependent. Prefer `network_uuid` (an `xe network-create` network) over a raw bridge name: `xcp-networkd` can otherwise tear down ports it does not recognise.
+- **Traffic filtering**: use the native `xenserver.vif.set_acl` where it suffices (it survives xapi reconfiguration); raw `openvswitch.flow.*` rules cover the rest but carry no such guarantee.
+- **`nfsmount.mount`** accepts any absolute mount point; there is no configured base directory. Restrict who can call it. Server, export path, mount point and options are validated.
+- **`xenserver.vdi.export`** has no `xe` equivalent; it authenticates over the local xapi Unix socket (`xenserver.xapi_socket_path`).
+- **Hot-plug** (`vbd.plug`, `vif.plug` and their `unplug`) needs the guest's Xen PV drivers/tools running.
+- **Disk resize** grows a disk, never shrinks it. xapi refuses to resize a disk that is plugged into a running VM on NFS storage; unplug it or stop the VM first. Growing the partition and filesystem inside the guest is up to the guest.
 
-- **VM/SR identification** accepts either `uuid` or `name` (a name-label). `uuid` wins when both are given; `name` must resolve to exactly one match or the operation is rejected as ambiguous/not-found.
-- **VXLAN** (`openvswitch.vxlan.*`) is implemented via direct `ovs-vsctl` commands rather than xapi's `tunnel` object, since the tunnel API's VXLAN support is version-dependent. Prefer passing `network_uuid` (a `xe network-create`-backed network) over a raw `bridge` name where possible — `xcp-networkd` only preserves OVS state it recognizes as belonging to a xapi network, and can otherwise tear down unrecognized ports/bridges on its own reconciliation events (xapi restart, host reboot, etc.).
-- **Traffic filtering** is available two ways: the native, xapi-managed `xenserver.vif.set_acl` (anti-spoofing / IP allowlisting via `locking-mode`) and raw `openvswitch.flow.*` rules for anything the native ACL can't express. Prefer the native ACL where it suffices — it survives xapi's own reconfiguration; raw flow rules do not have that guarantee.
-- **`nfsmount.mount`** does not confine mount points to a configured base directory — the platform may mount anywhere it asks. This is a deliberate choice; restrict what the platform is permitted to send if that's a concern in your deployment.
-- **`xenserver.vdi.export`** has no `xe` subprocess equivalent — raw single-disk export only exists through xapi's local HTTP interface, so this operation authenticates over the local xapi Unix socket (`xenserver.xapi_socket_path`) instead of shelling out.
+#### IPMI, performance and events
 
-#### Replacing the RRD/IPMI/events sidecar scripts
+The agent replaces the old per-host polling scripts:
 
-Historically, XenServer hosts had three Python scripts (`rrd.py`, `ipmi.py`, `events.py`) pushed to Dom0 and cron'd to poll XAPI's performance/event/IPMI interfaces and `curl` the results to the platform. The agent now does all three natively — no sidecar scripts, no cron, no plaintext-adjacent `curl` shelling:
+- **`xenserver.events_enabled`**: long-polls xapi's event bus and streams every VM/SR/host change over NATS as `xapi_event`.
+- **`xenserver.ipmi_enabled`**: periodically publishes the IPMI sensor table (temperatures, fans, voltages, power supplies, thresholds) as an `ipmi` message. On demand: `xenserver.ipmi.sensors`.
+- **`xenserver.rrd_enabled`**: merges xapi's per-VM RRD utilisation (CPU, memory, disk, network as observed from Dom0) into telemetry under `vms`. On demand: `xenserver.metrics.rrd`.
 
-- **`xenserver.events_enabled`** — long-polls XAPI's own object-change event bus (`event.from`) and streams every event (VM/SR/host/... state change) to the platform as a `xapi_event` message, in real time rather than on a cron cadence.
-- **`xenserver.ipmi_enabled`** — periodically runs `ipmitool sensor` and publishes the full sensor table (temperatures, fans, voltages, power supplies, with thresholds) as an `ipmi` message. Also available on-demand via the `xenserver.ipmi.sensors` operation.
-- **`xenserver.rrd_enabled`** — merges XAPI's own RRD-derived per-VM utilisation (actual observed CPU/memory/disk/network usage inside each guest, which Dom0 has no other way to see) into the regular telemetry push as a `vms` key, matching the schema `docs/protocol.md` already anticipated for compute agents. Also available on-demand via `xenserver.metrics.rrd`.
+All three default to disabled.
 
-All three default to `false`/disabled — enable them per-host once you're ready to retire the corresponding Python script and cron entry.
+---
+
+## Background (async) operations
+
+Long operations (`xenserver.vm.snapshot_export`, `vm.export`, `vm.import`, `vdi.copy`, `vdi.clone`, `vdi.export`, `vm.clone`, `vm.create`, `sr.scan`) accept `"async": true` in `params`. The agent starts the work in the background and replies at once: HTTP `202` over HTTPS and `payload.status: "accepted"` on any transport, with the job in `output`:
+
+```json
+{"operation":"xenserver.vm.snapshot_export","params":{"uuid":"<snapshot-uuid>","filename":"/mnt/backup/x.xva","async":true}}
+→ 202 {"status":"accepted","output":{"job_id":"…","status":"running",…}}
+```
+
+Poll `agent.job.status` with the `job_id`. Exports report `progress.bytes_done` against an estimated `bytes_total`, so `percent` is indicative and capped at 99 until the job finishes. `agent.job.cancel` stops a job and removes a half-written export. Jobs are held in memory: they are lost on agent restart, and a job running at shutdown is cancelled. At most `agent.max_jobs` (default 2) run at once. Details and a restore walkthrough: [docs/backups.md](docs/backups.md).
+
+---
+
+## Optional HTTPS endpoint
+
+Disabled by default; set `http.enabled: true`.
+
+- `POST /v1/command`: body is the command envelope, header `Authorization: Bearer <api_key>`. Returns the result envelope (HTTP 200, with the outcome in `payload.status`; HTTP 202 for accepted async jobs). Same allowlist as NATS.
+- `GET /healthz`: unauthenticated liveness.
+- **TLS:** with `http.self_signed: true` an ECDSA P-256 certificate is generated at `http.cert_file`/`http.key_file` on first start, reused afterwards and renewed 30 days before expiry. Existing certificates are never overwritten. The SHA-256 fingerprint is logged at startup; pin it on the client. Add extra names with `http.hosts`. Or point `cert_file`/`key_file` at your own certificate.
+- **Token:** the server refuses to start if `http.api_key` is shorter than 32 characters or still the `CHANGE_ME…` placeholder.
+- **HTTPS-only mode:** set `nats.enabled: false`. The agent then makes no outbound connections and publishes nothing; the caller polls.
+
+Full guide: [docs/https-api.md](docs/https-api.md).
 
 ---
 
@@ -241,7 +235,9 @@ chmod +x /usr/local/bin/plusclouds-agent
 # Copy bin/plusclouds.windows to the target machine and run it as a service
 ```
 
-### 2. Create the config directory
+Release binaries and checksums are attached to each GitHub release.
+
+### 2. Create the directories
 
 ```bash
 mkdir -p /etc/plusclouds /var/log/plusclouds
@@ -250,18 +246,20 @@ chmod 0750 /var/log/plusclouds
 
 ### 3. Deploy the config
 
+For NATS use `configs/agent.yaml`; for HTTPS use `configs/agent.https.yaml`:
+
 ```bash
 scp configs/agent.yaml root@<server-ip>:/etc/plusclouds/agent.yaml
 ```
 
-Edit `/etc/plusclouds/agent.yaml` and set the identity fields for this machine (written automatically during VM provisioning):
+NATS identity fields (normally written during provisioning):
 
 ```yaml
 nats:
   connection_type: websocket           # "nats" or "websocket"
-  websocket_url: wss://nats.plusclouds.com:443
-  agent_uuid: "<vm-uuid>"             # from iaas_virtual_machines
-  api_key:     "<agent-api-key>"      # from iaas_virtual_machines.events_token
+  websocket_url: wss://nats.example.com:443
+  agent_uuid: "<agent-uuid>"
+  api_key:     "<agent-api-key>"
 ```
 
 ### 4. Install and start the systemd service
@@ -280,13 +278,10 @@ journalctl -fu plusclouds-agent
 tail -f /var/log/plusclouds/agent.log | jq .
 ```
 
-You should see:
-```
-agent identity resolved   {"agent_uuid": "..."}
-connected to NATS         {"url": "wss://nats.plusclouds.com:443"}
-capabilities published    {"operation_count": 17}
-heartbeat published
-telemetry published
+Expect `agent started` with the transports in use (NATS: also `connected to NATS`, `capabilities published`, `heartbeat published`). Run it in the foreground with debug logging to see every command and result:
+
+```bash
+plusclouds-agent --config /etc/plusclouds/agent.yaml   # set log.level: debug
 ```
 
 ---
@@ -295,18 +290,29 @@ telemetry published
 
 ```yaml
 nats:
+  enabled: true                        # false = HTTPS-only: no NATS connection, no pushes
   connection_type: websocket           # nats | websocket (ws:// needs no certificates)
-  url: nats://nats.plusclouds.com:4222
-  websocket_url: wss://nats.plusclouds.com:443
-  agent_uuid: ""                       # VM UUID — set by provisioning
+  url: nats://nats.example.com:4222
+  websocket_url: wss://nats.example.com:443
+  agent_uuid: ""                       # agent UUID — set by provisioning
   api_key: ""                          # NATS auth token — set by provisioning
   max_reconnects: -1                   # -1 = unlimited
   reconnect_wait: 5s
 
+http:                                  # optional HTTPS endpoint (see "Optional HTTPS endpoint")
+  enabled: false
+  listen: "0.0.0.0:8443"
+  cert_file: /var/lib/plusclouds/tls/agent.crt
+  key_file: /var/lib/plusclouds/tls/agent.key
+  self_signed: true                    # generate the cert on first start if missing
+  api_key: ""                          # bearer token, at least 32 characters
+  hosts: []                            # extra DNS names / IPs for the self-signed cert
+
 agent:
   heartbeat_interval: 30s
   telemetry_interval: 30s             # changeable at runtime via telemetry.set_interval
-  dry_run: false                      # true = log commands instead of running them (see below)
+  dry_run: false                      # true = validate only, execute nothing (see Dry-run mode)
+  max_jobs: 2                         # concurrent background (async) jobs
   allowed_operations:
     - agent.allowed_operations
     - services.list
@@ -325,6 +331,9 @@ agent:
     - system.network
     - system.update
     - telemetry.set_interval
+    - agent.job.status                  # background-job polling
+    - agent.job.list
+    # - agent.job.cancel
     # - vm.reboot
     # - vm.shutdown
     # - exec
@@ -392,6 +401,8 @@ agent:
     # - xenserver.vm.cd_eject
     # - xenserver.vm.cd_remove
     # - xenserver.vif.create
+    # - xenserver.vif.plug
+    # - xenserver.vif.unplug
     # - xenserver.vif.param_set
     # - xenserver.network.create
     # - xenserver.network.destroy
@@ -458,36 +469,7 @@ autoheal:
   restart_delay: 10s
 ```
 
-All values can be overridden by environment variables using the prefix `PLUSCLOUDS_AGENT_` (e.g. `PLUSCLOUDS_AGENT_NATS_API_KEY`).
-
----
-
-## Building from source
-
-Requires Go 1.22+.
-
-```bash
-# Development build (current OS)
-make build
-
-# Production build — Linux amd64, static binary, stripped
-make build-linux
-
-# Production build — Windows amd64
-make build-windows
-
-# Both platforms at once
-make build-all
-
-# Run tests
-make test
-```
-
-Outputs:
-```
-bin/plusclouds.linux    — ELF 64-bit, statically linked, ~12 MB
-bin/plusclouds.windows  — PE32+, ~12 MB
-```
+All values can be overridden by environment variables using the prefix `PLUSCLOUDS_AGENT_` (e.g. `PLUSCLOUDS_AGENT_HTTP_API_KEY`). Keep real keys out of files you commit.
 
 ---
 
@@ -495,31 +477,71 @@ bin/plusclouds.windows  — PE32+, ~12 MB
 
 | Feature | Linux | Windows |
 |---|---|---|
-| NATS connection | ✅ | ✅ |
+| NATS and HTTPS transports | ✅ | ✅ |
 | Telemetry (CPU, RAM, disk, network) | ✅ | ✅ (load_avg = 0) |
-| Heartbeat | ✅ | ✅ |
-| Capabilities event | ✅ | ✅ |
+| Heartbeat, capabilities | ✅ | ✅ |
 | Service management | ✅ systemd/D-Bus | ⚙ stub (SCM planned) |
 | `system.update` | ✅ Ubuntu/Debian | ✗ |
 | `vm.reboot` / `vm.shutdown` | ✅ `systemctl` | ✅ `shutdown /r` |
+| XenServer / Open vSwitch / NFS operations | ✅ on Dom0 | ✗ |
+
+The Windows binary is cross-compiled and has not been run in production.
 
 ---
 
 ## Security model
 
-- **Outbound-only** — the agent never listens on any port
-- **Scoped JWT** — the NATS auth callout issues a JWT granting publish/subscribe only to this agent's own subjects
-- **Operation allowlist** — `allowed_operations` in `agent.yaml` is a hard gate; unknown or unlisted operations return `rejected`
-- **Exec allowlist** — when `exec` is enabled, only binaries explicitly listed in `allowed_commands` can be invoked
-- **Token revocation** — remove `events_token` from the platform database and the agent is rejected on its next connection attempt
+Summary; details in [docs/security.md](docs/security.md).
+
+- **Operation allowlist.** `allowed_operations` is a hard gate; unlisted operations return `rejected`. State-changing operations ship disabled.
+- **Destructive operations** need `confirm: true`. Attached disks, the management interface and similar footguns are refused by default.
+- **Exec allowlist.** When `exec` is enabled, only binaries listed in `allowed_commands` run, with no shell.
+- **Transport security.** NATS: outbound-only, scoped JWT per agent, revocable. HTTPS: TLS 1.2+, constant-time bearer-token check, 1 MiB request limit, token of at least 32 characters.
+- **Secrets are masked** in logs, error output and parameter listings.
+- **Argument injection** is closed off: values go to `xe`, `mount` and `umount` as discrete arguments after validation, never through a shell.
+- **Run as root only where required** (Dom0). The agent kills any child process it started if it dies.
+- **Treat the HTTPS endpoint like an admin API:** bind to a management network, firewall it, rotate the token, and enable only the operations you need.
 
 ---
 
 ## Dry-run mode
 
-Set `agent.dry_run: true` in `agent.yaml` to run the agent without touching the host. Every operation is still authenticated and checked against `allowed_operations`, required parameters, `confirm` for destructive operations and `allowed_commands` for `exec`, but nothing is executed: a valid call returns `{"dry_run": true, "executed": false, "operation": ..., "params": ...}` (secrets masked), and an invalid one is rejected exactly as it would be for real. The `agent.*` meta operations (job status etc.) still run. Works the same over HTTPS and NATS. The agent logs a prominent warning on startup when dry-run is active.
+Set `agent.dry_run: true` to run the agent without touching the host. Every operation is still authenticated and checked against `allowed_operations`, required parameters, `confirm` for destructive operations and `allowed_commands` for `exec`, but nothing is executed. A valid call returns `{"dry_run": true, "executed": false, "operation": ..., "params": ...}` (secrets masked); an invalid one is rejected exactly as it would be for real. The `agent.*` meta operations (job status and so on) still run. It works the same over HTTPS and NATS, and the agent logs a prominent warning on startup. Dry-run cannot predict errors that only appear at run time, such as a wrong uuid.
 
-This does **not** cover `services.*` — those go through systemd D-Bus method calls, not a subprocess, so there's no command line to log or skip.
+---
+
+## Building from source
+
+Requires Go 1.25+.
+
+```bash
+make build          # development build (current OS)
+make build-linux    # Linux amd64, static, stripped  → bin/plusclouds.linux
+make build-windows  # Windows amd64                  → bin/plusclouds.windows
+make build-all      # both
+make test           # go test -race with coverage
+```
+
+Regenerate the operations reference after changing the catalog:
+
+```bash
+GEN_API_DOC=1 go test ./internal/publisher -run TestGenerateAPIDoc
+```
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/https-api.md](docs/https-api.md) | HTTPS endpoint: auth, envelope, results, errors, async jobs, examples |
+| [docs/backups.md](docs/backups.md) | Snapshots, exports, restore, background jobs, NFS targets |
+| [docs/operations.md](docs/operations.md) | Every operation and parameter (generated) |
+| [docs/security.md](docs/security.md) | Threat model, hardening checklist |
+| [docs/protocol.md](docs/protocol.md) | Message envelope and payload schemas |
+| [docs/overview.md](docs/overview.md) | NATS subjects and message flow |
+| [docs/architecture.md](docs/architecture.md), [integration.md](docs/integration.md), [orchestration.md](docs/orchestration.md) | Provisioning (ISO config drive) and platform integration. Parts describe the earlier REST design; see the notes at the top of each |
+| [docs/api.md](docs/api.md), [docs/cli.md](docs/cli.md) | Legacy REST API and `plsctl` (not part of the current agent) |
 
 ---
 
@@ -547,24 +569,3 @@ Browse all available libraries and building blocks:
 Great infrastructure is built together. The PlusClouds developer community is where engineers share ideas, ask questions, and help shape the direction of the platform. Whether you're integrating a single agent or building an entire infrastructure layer on our stack — you're welcome here.
 
 [https://plusclouds.com/us/community](https://plusclouds.com/us/community)
-
-## Background (async) operations
-
-Long operations — `xenserver.vm.snapshot_export`, `vm.export`, `vm.import`, `vdi.copy`, `vdi.clone`, `vdi.export` — accept `"async": true` in `params`. The agent starts the work in the background and replies at once: HTTP `202` over HTTPS, and `payload.status: "accepted"` on any transport, with the job in `output`:
-
-```json
-{"operation":"xenserver.vm.snapshot_export","params":{"uuid":"<snapshot>","filename":"/mnt/backup/x.xva","async":true}}
-→ 202 {"status":"accepted","output":{"job_id":"…","status":"running",…}}
-```
-
-Poll `agent.job.status` with the `job_id`. Exports report `progress.bytes_done` (the file size on disk) against an estimated `bytes_total` (allocated disk size), so `percent` is indicative and capped at 99 until the job truly finishes; imports report elapsed time only. When finished, `result` holds the operation's own output (the same JSON the blocking call returns) and `status` is `completed`, or `failed` with `error`. `agent.job.cancel` stops a job and removes a half-written export.
-
-Jobs live in memory only: they are lost on agent restart, and a job running at shutdown is cancelled. At most `agent.max_jobs` (default 2) run at once; further requests fail until one finishes. Add `agent.job.status` and `agent.job.list` (enabled by default) and, if wanted, `agent.job.cancel` to `allowed_operations`.
-
-## Optional HTTPS endpoint
-
-Disabled by default. Set `http.enabled: true` in `agent.yaml` to expose the dispatcher over HTTPS next to NATS.
-
-- `POST /v1/command` — body is the command envelope, header `Authorization: Bearer <api_key>`. Returns the result envelope (HTTP 200; outcome in `payload.status`). Same `allowed_operations` allowlist as NATS. The server refuses to start if `http.api_key` is shorter than 32 characters or still the `CHANGE_ME…` placeholder.
-- `GET /healthz` — unauthenticated liveness.
-- TLS: with `http.self_signed: true` an ECDSA P-256 cert is generated at `http.cert_file`/`http.key_file` on first start, reused afterwards and renewed 30 days before expiry. Existing certs are never overwritten. The SHA-256 fingerprint is logged at startup; pin it on the client (`curl -k` or `--pinnedpubkey`). Add extra SANs via `http.hosts`.
