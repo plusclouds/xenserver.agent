@@ -5,6 +5,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -39,12 +40,15 @@ func (m *linuxManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing systemd units: %w", err)
 	}
+	fileStates := m.unitFileStates(ctx)
 	services := make([]ServiceInfo, 0, len(units))
 	for _, u := range units {
 		if !strings.HasSuffix(u.Name, ".service") {
 			continue
 		}
-		services = append(services, unitToServiceInfo(u))
+		info := unitToServiceInfo(u)
+		applyUnitFileState(&info, fileStates)
+		services = append(services, info)
 	}
 	return services, nil
 }
@@ -56,13 +60,70 @@ func (m *linuxManager) Get(ctx context.Context, name string) (*ServiceInfo, erro
 	name = ensureServiceSuffix(name)
 	units, err := m.bus.ListUnitsByNamesContext(ctx, []string{name})
 	if err != nil {
-		return nil, fmt.Errorf("querying unit %s: %w", name, err)
+		if !isUnknownMethod(err) {
+			return nil, fmt.Errorf("querying unit %s: %w", name, err)
+		}
+		// Older systemd (e.g. v219 on XenServer/XCP-ng 8.x) has no
+		// ListUnitsByNames; fall back to the plain list, which every version has.
+		all, lerr := m.bus.ListUnitsContext(ctx)
+		if lerr != nil {
+			return nil, fmt.Errorf("listing systemd units: %w", lerr)
+		}
+		units = pickUnits(all, name)
 	}
 	if len(units) == 0 {
-		return nil, fmt.Errorf("unit not found: %s", name)
+		return nil, fmt.Errorf("unit not found (or not loaded by systemd): %s", name)
 	}
 	info := unitToServiceInfo(units[0])
+	applyUnitFileState(&info, m.unitFileStates(ctx))
 	return &info, nil
+}
+
+// unitFileStates maps unit name to systemd's unit-file state ("enabled",
+// "disabled", "static", ...). Best effort: nil if it cannot be read.
+func (m *linuxManager) unitFileStates(ctx context.Context) map[string]string {
+	files, err := m.bus.ListUnitFilesContext(ctx)
+	if err != nil {
+		m.logger.Debug("could not read unit file states", zap.Error(err))
+		return nil
+	}
+	return unitFileStateMap(files)
+}
+
+// unitFileStateMap indexes unit files by unit name.
+func unitFileStateMap(files []dbus.UnitFile) map[string]string {
+	out := make(map[string]string, len(files))
+	for _, f := range files {
+		out[filepath.Base(f.Path)] = f.Type
+	}
+	return out
+}
+
+// applyUnitFileState fills Enabled and UnitFileState from the state map.
+func applyUnitFileState(info *ServiceInfo, states map[string]string) {
+	st, ok := states[info.Name]
+	if !ok {
+		return
+	}
+	info.UnitFileState = st
+	info.Enabled = st == "enabled" || st == "enabled-runtime"
+}
+
+// isUnknownMethod reports whether err is systemd saying the D-Bus method does
+// not exist on this version.
+func isUnknownMethod(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Unknown method")
+}
+
+// pickUnits returns the entries of all whose name equals name.
+func pickUnits(all []dbus.UnitStatus, name string) []dbus.UnitStatus {
+	var out []dbus.UnitStatus
+	for _, u := range all {
+		if u.Name == name {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 func (m *linuxManager) Start(ctx context.Context, name string) (*ActionResult, error) {

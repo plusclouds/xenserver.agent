@@ -29,9 +29,37 @@ nats:
   max_reconnects: -1
   reconnect_wait: 5s
 
+# Optional HTTPS command endpoint (in addition to NATS). Disabled by default.
+#   POST /v1/command  — body: command envelope, header: Authorization: Bearer <api_key>
+#   GET  /healthz     — unauthenticated liveness
+# Same allowed_operations allowlist applies as for NATS.
+http:
+  enabled: false
+  listen: ":8443"
+  # With self_signed: true, a cert is generated at these paths on first start
+  # and reused (renewed 30 days before expiry). Existing certs are never overwritten.
+  cert_file: /var/lib/plusclouds/tls/agent.crt
+  key_file: /var/lib/plusclouds/tls/agent.key
+  self_signed: true
+  # Bearer token for callers. Empty = reuse nats.api_key.
+  api_key: ""
+  # Extra DNS names / IPs for the self-signed cert SANs (hostname, localhost and
+  # local interface IPs are added automatically).
+  hosts: []
+
 agent:
   heartbeat_interval: 30s
   telemetry_interval: 30s
+
+  # When true, no subprocess is actually executed (xe, ovs-vsctl, ovs-ofctl,
+  # mount, apt-get, exec, vm.reboot/shutdown, etc.) — the command is logged
+  # instead, and the operation's result output contains a "[DRY RUN] ..."
+  # marker showing exactly what would have run. Does NOT cover services.* —
+  # those go through systemd D-Bus, not a subprocess.
+  dry_run: false
+
+  # Max background (async) jobs running at once. See "Background operations" in README.
+  max_jobs: 2
 
   # Operations this agent is permitted to execute.
   # Remove any entry to disable that operation — the platform will receive a
@@ -59,6 +87,110 @@ agent:
     # - vm.reboot
     # - vm.shutdown
 
+    # Read-only XenServer/OVS/NFS inventory ops — safe, enabled by default.
+    - xenserver.pool.info
+    - xenserver.host.list
+    - xenserver.host.info
+    - xenserver.vm.list
+    - xenserver.vm.get
+    - xenserver.vm.snapshot_list
+    - xenserver.sr.list
+    - xenserver.sr.get
+    - xenserver.network.list
+    - xenserver.vif.list
+    - xenserver.vm.disk_list
+    - xenserver.vm.param_get
+    - xenserver.vm.param_list
+    - xenserver.vm.console_list
+    - xenserver.vm.cd_list
+    - xenserver.vdi.param_list
+    - xenserver.vbd.param_list
+    - xenserver.vif.param_list
+    - xenserver.network.param_list
+    - xenserver.vlan.list
+    - xenserver.vlan.param_list
+    - xenserver.pif.list
+    - xenserver.pif.param_list
+    - xenserver.pif.param_get
+    - xenserver.pbd.list
+    - xenserver.pbd.param_list
+    - xenserver.task.list
+    - xenserver.sr.param_list
+    - xenserver.sr.param_get
+    - xenserver.host.param_list
+    - xenserver.vdi.list
+    - xenserver.ipmi.sensors
+    - xenserver.metrics.rrd
+    - openvswitch.bridge.list
+    - openvswitch.port.list
+    - openvswitch.flow.list
+    - nfsmount.list
+    - nfsmount.list_files
+    - agent.job.status
+    - agent.job.list
+    # - agent.job.cancel
+
+    # State-changing XenServer/OVS/NFS ops — hypervisor-level blast radius is
+    # much higher than a systemd restart or self vm.reboot, so these ship
+    # disabled. Uncomment individually as needed.
+    # - xenserver.vm.start
+    # - xenserver.vm.shutdown
+    # - xenserver.vm.reboot
+    # - xenserver.vm.force_shutdown
+    # - xenserver.vm.force_reboot
+    # - xenserver.vm.suspend
+    # - xenserver.vm.resume
+    # - xenserver.vm.snapshot_create
+    # - xenserver.vm.param_set
+    # - xenserver.vm.memory_limits_set
+    # - xenserver.vm.create
+    # - xenserver.vm.clone
+    # - xenserver.vm.destroy
+    # - xenserver.vm.pause
+    # - xenserver.vm.unpause
+    # - xenserver.vdi.create
+    # - xenserver.vdi.destroy
+    # - xenserver.vbd.create
+    # - xenserver.vbd.plug
+    # - xenserver.vbd.unplug
+    # - xenserver.vbd.destroy
+    # - xenserver.vm.cd_add
+    # - xenserver.vm.cd_insert
+    # - xenserver.vm.cd_eject
+    # - xenserver.vm.cd_remove
+    # - xenserver.vif.create
+    # - xenserver.vif.plug
+    # - xenserver.vif.unplug
+    # - xenserver.vif.param_set
+    # - xenserver.network.create
+    # - xenserver.network.destroy
+    # - xenserver.vlan.create
+    # - xenserver.vlan.destroy
+    # - xenserver.pif.unplug
+    # - xenserver.sr.scan
+    # - xenserver.vm.snapshot_promote
+    # - xenserver.vm.promote_template
+    # - xenserver.vm.snapshot_export
+    # - xenserver.vm.snapshot_delete
+    # - xenserver.sr.create
+    # - xenserver.sr.remove
+    # - xenserver.sr.set_default
+    # - xenserver.vif.set_network
+    # - xenserver.vif.remove
+    # - xenserver.vif.set_acl
+    # - xenserver.vm.import
+    # - xenserver.vm.export
+    # - xenserver.vdi.copy
+    # - xenserver.vdi.resize
+    # - xenserver.vdi.clone
+    # - xenserver.vdi.export
+    # - openvswitch.vxlan.create
+    # - openvswitch.vxlan.remove
+    # - openvswitch.flow.add
+    # - openvswitch.flow.remove
+    # - nfsmount.mount
+    # - nfsmount.unmount
+
   # When "exec" is listed above, only these exact binary paths may be invoked.
   # Requests referencing unlisted paths are rejected.
   allowed_commands:
@@ -66,6 +198,38 @@ agent:
     - /usr/bin/df
     - /usr/bin/free
     - /usr/bin/ls
+
+# XenServer/XCP-ng hypervisor management (Dom0 only). See README.md for the
+# full xenserver.*/openvswitch.*/nfsmount.* operation list.
+xenserver:
+  xe_binary: /usr/bin/xe
+  inventory_path: /etc/xensource-inventory
+  xapi_socket_path: /var/lib/xcp/xapi
+  ipmi_binary: /usr/bin/ipmitool
+
+  # Replaces the events.py sidecar script: long-polls XAPI's own event bus
+  # and streams every VM/SR/host/... change to the platform as it happens.
+  events_enabled: false
+  events_poll_interval: 10s
+
+  # Replaces the ipmi.py sidecar script: periodically reads IPMI sensor data
+  # (temperatures, fans, voltages, power supplies) and publishes it.
+  ipmi_enabled: false
+  ipmi_interval: 60s
+
+  # Replaces the rrd.py sidecar script: merges XAPI RRD-derived per-VM
+  # utilisation (actual observed CPU/memory/disk/network usage inside each
+  # guest, not just static allocation) into the periodic telemetry push as
+  # a "vms" key.
+  rrd_enabled: false
+
+openvswitch:
+  vsctl_binary: /usr/bin/ovs-vsctl
+  ofctl_binary: /usr/bin/ovs-ofctl
+
+nfsmount:
+  mount_binary: /usr/bin/mount
+  umount_binary: /usr/bin/umount
 
 iso:
   # Mount path checked at startup. In production the ISO is unmounted before

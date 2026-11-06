@@ -27,21 +27,24 @@ const (
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
 	StatusRejected  = "rejected"
+	// StatusAccepted means a long operation was started in the background;
+	// output carries the job to poll with agent.job.status.
+	StatusAccepted = "accepted"
 )
 
 // Envelope is the top-level wrapper for every NATS message in both directions.
 type Envelope struct {
-	V         int             `json:"v"`
-	ID        string          `json:"id"`
-	Type      string          `json:"type"`
-	AgentType string          `json:"agent_type"`
-	AgentUUID string          `json:"agent_uuid"`
-	Timestamp int64           `json:"timestamp"`
+	V         int    `json:"v"`
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	AgentType string `json:"agent_type"`
+	AgentUUID string `json:"agent_uuid"`
+	Timestamp int64  `json:"timestamp"`
 	// ReplyTo is set by the platform on sync commands (AgentCommandService::send).
 	// The agent publishes the result directly to this inbox subject instead of
 	// the evt subject. Absent on all other messages.
-	ReplyTo   string          `json:"reply_to,omitempty"`
-	Payload   json.RawMessage `json:"payload"`
+	ReplyTo string          `json:"reply_to,omitempty"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 // CommandPayload is the payload shape for platform → agent command messages.
@@ -89,10 +92,10 @@ type XAPIEventPayload struct {
 // OperationParam describes a single parameter accepted by an operation.
 type OperationParam struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`                  // "string", "integer", "array"
+	Type        string `json:"type"` // "string", "integer", "array"
 	Required    bool   `json:"required"`
 	Description string `json:"description"`
-	MinValue    *int   `json:"min_value,omitempty"`   // for integer types
+	MinValue    *int   `json:"min_value,omitempty"` // for integer types
 }
 
 // OperationSchema describes one executable operation including its parameters.
