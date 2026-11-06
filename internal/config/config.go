@@ -12,8 +12,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AgentVersion is set at build time via -ldflags.
-const AgentVersion = "0.2.0"
+// AgentVersion is the build version. It is stamped at build time with
+// -ldflags "-X .../internal/config.AgentVersion=<version>" (see the Makefile);
+// a plain `go build` reports "dev".
+var AgentVersion = "dev"
 
 // Config is the top-level configuration structure for the agent.
 type Config struct {

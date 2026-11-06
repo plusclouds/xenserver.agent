@@ -1,6 +1,6 @@
 [Unit]
-Description=PlusClouds Ubuntu VM Agent
-Documentation=https://github.com/plusclouds/vm.agent
+Description=PlusClouds Agent
+Documentation=https://github.com/plusclouds/xenserver.agent
 After=network-online.target systemd-resolved.service
 Wants=network-online.target
 

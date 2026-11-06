@@ -24,8 +24,8 @@ type Client struct {
 // and returns a ready Client.
 //
 // The agent JWT issued by the NATS auth callout grants permission only to:
-//   - Subscribe: agent.vm.{uuid}.cmd
-//   - Publish:   agent.vm.{uuid}.evt
+//   - Subscribe: agent.compute.{uuid}.cmd
+//   - Publish:   agent.compute.{uuid}.evt
 //
 // JetStream consumer management (which requires $JS.API.* publish and _INBOX.*
 // subscribe) is therefore not available to the agent. Message durability is
@@ -110,13 +110,8 @@ func (c *Client) Subscribe(handler func(env protocol.Envelope)) error {
 			)
 			return
 		}
-		if env.V != 1 {
-			c.logger.Warn("dropping command with unknown protocol version",
-				zap.String("subject", msg.Subject),
-				zap.Int("v", env.V),
-			)
-			return
-		}
+		// Protocol-version checking happens in the dispatcher, which answers
+		// an unsupported version with a rejected result instead of silence.
 		handler(env)
 	})
 	if err != nil {
