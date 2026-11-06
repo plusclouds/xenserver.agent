@@ -76,21 +76,28 @@ Agent receives command → executes → publishes result to agent.storage.{uuid}
 
 All `agent.>` subjects are captured by the `AGENT_COMMANDS` JetStream stream (file storage, 24h TTL, 1000 msgs/subject). Agents create durable consumers on connect so they receive commands queued while they were offline.
 
-## Key files
+## HTTPS transport
 
-| File | Purpose |
+NATS is not required. With `http.enabled: true` the agent also (or, with `nats.enabled: false`, only) serves `POST /v1/command` over HTTPS. The request body is the same command envelope and the response body is the result envelope, so a caller can drive an agent directly with no message bus. Nothing is pushed in HTTPS-only mode; the caller polls (`agent.job.status` for background jobs). See [https-api.md](https-api.md).
+
+## Key files in this repository
+
+| Path | Purpose |
 |---|---|
-| `NextDeveloper/Events/src/Services/AgentCommandService.php` | Generic command dispatch (DB record + NATS publish) |
-| `NextDeveloper/Events/src/Services/NatsAuthCalloutService.php` | Agent token validation and JWT signing |
-| `app/Jobs/Nats/HandleAgentEventJob.php` | Routes inbound agent messages by type |
-| `app/Services/Agents/StorageAgentService.php` | Storage-specific message handlers |
-| `app/Services/Agents/StorageAgentCommandService.php` | Typed command dispatch for storage agents |
-| `app/Console/Commands/AgentCommandTimeoutCommand.php` | Marks timed-out commands (runs every minute) |
+| `cmd/agent/main.go` | Start-up: config, transports, dispatcher, jobs |
+| `internal/dispatcher/` | Allowlist, parameter checks, operation routing, dry-run, async jobs |
+| `internal/httpserver/` | HTTPS endpoint, bearer auth, self-signed certificate |
+| `internal/nats/` | NATS client and subscriptions |
+| `internal/publisher/` | Heartbeat, telemetry, capabilities, operation catalog |
+| `internal/jobs/` | Background job manager |
+| `internal/modules/xenserver/` | `xe`/xapi operations, IPMI, RRD |
+| `internal/modules/openvswitch/`, `nfsmount/`, `services/`, `system/` | Other operation groups |
+| `internal/executor/` | Safe subprocess execution with timeouts and secret masking |
 
 ## Related documentation
 
-- [protocol.md](protocol.md) — envelope format and all payload schemas
-- [database.md](database.md) — `agent_commands` table and lifecycle
-- [storage-agent.md](storage-agent.md) — storage-specific operations and examples
-- [../nats/auth-callout.md](../nats/auth-callout.md) — JWT signing internals
-- [../nats/naming-convention.md](../nats/naming-convention.md) — full subject naming rules
+- [protocol.md](protocol.md): envelope format and all payload schemas
+- [https-api.md](https-api.md): HTTPS endpoint guide
+- [operations.md](operations.md): every operation and parameter
+- [backups.md](backups.md): snapshots, exports and restore
+- [security.md](security.md): controls and hardening checklist

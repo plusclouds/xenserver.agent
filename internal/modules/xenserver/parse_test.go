@@ -174,7 +174,7 @@ func TestFriendlyVMPowerError(t *testing.T) {
 	badState := "You attempted an operation on a VM that was not in an appropriate power state at the time; for example, you attempted to start a VM that was already running. The parameters returned are the VM's handle, and the expected and actual VM state at the time of the call.\nvm: u (FortiGate)\nexpected: running\nactual: halted"
 	lacks := "You attempted an operation on a VM which lacks the feature.\nvm: u (FortiGate)"
 	noHosts := "There were no servers available to complete the specified operation."
-	noHostsOut := "There are no suitable hosts to start this VM on.\n\nrcell2s1    : Cannot start here [Host cannot attach to network: 98e0 (eth0)]"
+	noHostsOut := "There are no suitable hosts to start this VM on.\n\nhost1    : Cannot start here [Host cannot attach to network: 98e0 (eth0)]"
 	cases := []struct {
 		name, op, state string
 		force           bool

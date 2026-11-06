@@ -1,5 +1,7 @@
 # PlusClouds Agent REST API Reference
 
+> **Legacy document.** This describes the REST API and `plsctl` client of an early (v0.1) version of the agent. The current agent has no `/api/v1` REST API: it is driven by command envelopes over NATS or `POST /v1/command` over HTTPS. See the [README](../README.md), [https-api.md](https-api.md) and [operations.md](operations.md). Kept for reference only.
+
 ## Overview
 
 The PlusClouds agent exposes a REST API on port **8080** (configurable). All API

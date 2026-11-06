@@ -18,7 +18,7 @@ nats:
   # VM UUID — written here by the platform during provisioning.
   # Used as the NATS username for authentication.
   # Override via env: PLUSCLOUDS_AGENT_NATS_AGENT_UUID
-  agent_uuid: "d6199047-322a-4845-bdea-1d44dd1b49e5"
+  agent_uuid: "00000000-0000-0000-0000-000000000000"
 
   # Agent API key — written here by the platform during provisioning.
   # Used as the NATS password for authentication.
@@ -83,7 +83,7 @@ agent:
     - system.update
     - telemetry.set_interval
     # Uncomment to allow arbitrary command execution (see allowed_commands below)
-    - exec
+    # - exec
     # - vm.reboot
     # - vm.shutdown
 

@@ -1,5 +1,7 @@
 # PlusClouds Agent Architecture
 
+> **Partly outdated.** The ISO config drive provisioning described here is still current, but endpoints and REST calls to `/api/v1/...` belong to the earlier REST design and no longer exist. For controlling the agent today, see the [README](../README.md), [https-api.md](https-api.md) and [operations.md](operations.md).
+
 ## Overview
 
 The PlusClouds agent (`plusclouds-agent`) is a Go daemon that runs on every

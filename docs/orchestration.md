@@ -1,5 +1,7 @@
 # PlusClouds Agent — Orchestration Team Reference
 
+> **Partly outdated.** The ISO config drive provisioning described here is still current, but endpoints and REST calls to `/api/v1/...` belong to the earlier REST design and no longer exist. For controlling the agent today, see the [README](../README.md), [https-api.md](https-api.md) and [operations.md](operations.md).
+
 This document is the authoritative reference for the PlusClouds orchestration
 layer team. It covers the complete contract between the orchestrator and the
 agent: token lifecycle, ISO provisioning, every endpoint the agent calls, every
