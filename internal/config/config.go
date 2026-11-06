@@ -299,6 +299,7 @@ func setDefaults(v *viper.Viper) {
 		"xenserver.sr.param_list",
 		"xenserver.sr.param_get",
 		"xenserver.host.param_list",
+		"xenserver.inventory.snapshot",
 		"xenserver.vdi.list",
 		"xenserver.ipmi.sensors",
 		"xenserver.metrics.rrd",

@@ -10,6 +10,10 @@ type PoolInfo struct {
 	// Master is the uuid of the pool's master host.
 	Master    string `json:"master"`
 	HAEnabled bool   `json:"ha_enabled"`
+	// HostCount is the number of hosts in the pool; IsPoolMember is true when
+	// there is more than one (a standalone host is a pool of one).
+	HostCount    int  `json:"host_count"`
+	IsPoolMember bool `json:"is_pool_member"`
 }
 
 // HostSummary is a single row from the pool's host list.

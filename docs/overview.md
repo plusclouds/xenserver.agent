@@ -52,6 +52,7 @@ Every envelope carries `v`. See [protocol.md](protocol.md#versioning).
 - [protocol.md](protocol.md): envelope and payload schemas
 - [https-api.md](https-api.md): HTTPS guide
 - [operations.md](operations.md): every operation and parameter
+- [output-shapes.md](output-shapes.md): what read operations return
 - [provisioning.md](provisioning.md): identity, installation, credentials
 - [backups.md](backups.md): snapshots, exports and restore
 - [security.md](security.md): controls and hardening

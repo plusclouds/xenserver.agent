@@ -154,11 +154,17 @@ func (m *Module) PoolInfo(ctx context.Context) (*PoolInfo, error) {
 		return nil, fmt.Errorf("no pool record returned")
 	}
 	b := blocks[0]
+	count := 0
+	if hosts, herr := m.run(ctx, "host-list", "--minimal"); herr == nil {
+		count = len(splitMinimalList(hosts))
+	}
 	return &PoolInfo{
-		UUID:      b["uuid"],
-		NameLabel: b["name-label"],
-		Master:    b["master"],
-		HAEnabled: b["ha-enabled"] == "true",
+		UUID:         b["uuid"],
+		NameLabel:    b["name-label"],
+		Master:       b["master"],
+		HAEnabled:    b["ha-enabled"] == "true",
+		HostCount:    count,
+		IsPoolMember: count > 1,
 	}, nil
 }
 
