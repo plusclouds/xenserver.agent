@@ -11,6 +11,7 @@ Group=root
 
 ExecStartPre=/bin/mkdir -p /var/log/plusclouds
 ExecStartPre=/bin/chmod 0750 /var/log/plusclouds
+ExecStartPre=/bin/mkdir -p /var/lib/plusclouds/tls
 
 ExecStart=/usr/local/bin/plusclouds-agent --config /etc/plusclouds/agent.yaml
 
@@ -29,7 +30,7 @@ NoNewPrivileges=yes
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/plusclouds /etc/plusclouds
+ReadWritePaths=/var/log/plusclouds /etc/plusclouds /var/lib/plusclouds
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

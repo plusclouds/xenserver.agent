@@ -28,6 +28,9 @@ type ServiceInfo struct {
 	SubState string `json:"sub_state"`
 	// Enabled indicates whether the unit is enabled to start on boot.
 	Enabled bool `json:"enabled"`
+	// UnitFileState is systemd's own state for the unit file: enabled,
+	// disabled, static, masked, indirect, ... (empty if unknown).
+	UnitFileState string `json:"unit_file_state,omitempty"`
 	// PID is the main process ID of the running service (0 if not running).
 	PID uint32 `json:"pid,omitempty"`
 	// Since is the Unix timestamp (seconds) when the current state was entered.
