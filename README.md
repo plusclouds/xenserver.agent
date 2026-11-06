@@ -65,7 +65,7 @@ See [docs/https-api.md](docs/https-api.md) for the full HTTPS guide (envelope, r
 ```
             ┌────────────── platform / your tooling ──────────────┐
             │                                                     │
-   NATS  agent.{type}.{uuid}.cmd  ↓        ↑  .evt (results, telemetry, heartbeat, events)
+   NATS  agent.compute.{uuid}.cmd ↓        ↑  .evt (results, telemetry, heartbeat, events)
    HTTPS POST /v1/command         ↓        ↑  HTTP response (result envelope)
             │                                                     │
             └──────────────────────┬──────────────────────────────┘
@@ -81,8 +81,8 @@ See [docs/https-api.md](docs/https-api.md) for the full HTTPS guide (envelope, r
 Over NATS the agent subscribes to its own command subject and publishes to its own event subject:
 
 ```
-agent.{type}.{uuid}.cmd   ←  platform sends commands
-agent.{type}.{uuid}.evt   →  agent sends telemetry, heartbeat, capabilities, results
+agent.compute.{uuid}.cmd   ←  platform sends commands
+agent.compute.{uuid}.evt   →  agent sends telemetry, heartbeat, capabilities, results
 ```
 
 NATS authentication uses the agent's API key (written by the platform during provisioning); an auth callout issues a scoped JWT. HTTPS authentication is a static bearer token configured in `http.api_key`.
@@ -103,7 +103,7 @@ Every message in either direction, on either transport, shares one JSON envelope
 }
 ```
 
-See [docs/protocol.md](docs/protocol.md) for every payload type and the result format.
+See [docs/protocol.md](docs/protocol.md) for every payload type, the result format and versioning. `v` is the protocol version (currently `1`; an omitted `v` is treated as 1, anything else is rejected). `GET /healthz` and the `X-Agent-Version` / `X-Protocol-Version` response headers report the agent build and protocol version.
 
 ---
 
@@ -224,65 +224,18 @@ Full guide: [docs/https-api.md](docs/https-api.md).
 
 ## Installation
 
-### 1. Deploy the binary
+Short version for a hypervisor host (full guide, including identity, the optional config drive, credentials and upgrades: [docs/provisioning.md](docs/provisioning.md)):
 
 ```bash
-# Linux
-scp bin/plusclouds.linux root@<server-ip>:/usr/local/bin/plusclouds-agent
-chmod +x /usr/local/bin/plusclouds-agent
-
-# Windows
-# Copy bin/plusclouds.windows to the target machine and run it as a service
-```
-
-Release binaries and checksums are attached to each GitHub release.
-
-### 2. Create the directories
-
-```bash
-mkdir -p /etc/plusclouds /var/log/plusclouds
-chmod 0750 /var/log/plusclouds
-```
-
-### 3. Deploy the config
-
-For NATS use `configs/agent.yaml`; for HTTPS use `configs/agent.https.yaml`:
-
-```bash
-scp configs/agent.yaml root@<server-ip>:/etc/plusclouds/agent.yaml
-```
-
-NATS identity fields (normally written during provisioning):
-
-```yaml
-nats:
-  connection_type: websocket           # "nats" or "websocket"
-  websocket_url: wss://nats.example.com:443
-  agent_uuid: "<agent-uuid>"
-  api_key:     "<agent-api-key>"
-```
-
-### 4. Install and start the systemd service
-
-```bash
-scp systemd/plusclouds-agent.service root@<server-ip>:/etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now plusclouds-agent
-```
-
-### 5. Verify
-
-```bash
+install -m 0755 plusclouds-agent-linux-amd64 /usr/local/bin/plusclouds-agent   # from a release; verify SHA256SUMS
+mkdir -p /etc/plusclouds /var/log/plusclouds /var/lib/plusclouds/tls
+install -m 0600 configs/agent.https.yaml /etc/plusclouds/agent.yaml            # or configs/agent.yaml for NATS
+install -m 0644 systemd/plusclouds-agent.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now plusclouds-agent
 journalctl -fu plusclouds-agent
-# or
-tail -f /var/log/plusclouds/agent.log | jq .
 ```
 
-Expect `agent started` with the transports in use (NATS: also `connected to NATS`, `capabilities published`, `heartbeat published`). Run it in the foreground with debug logging to see every command and result:
-
-```bash
-plusclouds-agent --config /etc/plusclouds/agent.yaml   # set log.level: debug
-```
+To see every command and result, stop the service and run `plusclouds-agent --config /etc/plusclouds/agent.yaml` in the foreground with `log.level: debug`.
 
 ---
 
@@ -534,14 +487,14 @@ GEN_API_DOC=1 go test ./internal/publisher -run TestGenerateAPIDoc
 
 | Document | Contents |
 |---|---|
+| [docs/provisioning.md](docs/provisioning.md) | Identity, config drive, installation, credentials, upgrades |
 | [docs/https-api.md](docs/https-api.md) | HTTPS endpoint: auth, envelope, results, errors, async jobs, examples |
 | [docs/backups.md](docs/backups.md) | Snapshots, exports, restore, background jobs, NFS targets |
 | [docs/operations.md](docs/operations.md) | Every operation and parameter (generated) |
-| [docs/security.md](docs/security.md) | Threat model, hardening checklist |
-| [docs/protocol.md](docs/protocol.md) | Message envelope and payload schemas |
-| [docs/overview.md](docs/overview.md) | NATS subjects and message flow |
-| [docs/architecture.md](docs/architecture.md), [integration.md](docs/integration.md), [orchestration.md](docs/orchestration.md) | Provisioning (ISO config drive) and platform integration. Parts describe the earlier REST design; see the notes at the top of each |
-| [docs/api.md](docs/api.md), [docs/cli.md](docs/cli.md) | Legacy REST API and `plsctl` (not part of the current agent) |
+| [docs/output-shapes.md](docs/output-shapes.md) | What the read operations return (summary vs full xe parameter shapes) |
+| [docs/protocol.md](docs/protocol.md) | Envelope, results, pushed messages, versioning |
+| [docs/overview.md](docs/overview.md) | Transports, NATS subjects, message flow |
+| [docs/security.md](docs/security.md) | Controls, hardening checklist, known limits |
 
 ---
 

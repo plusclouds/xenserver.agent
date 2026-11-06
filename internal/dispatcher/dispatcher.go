@@ -214,6 +214,7 @@ type params struct {
 	NameLabel     string            `json:"name_label"`
 	IsControlDom  *bool             `json:"is_control_domain"`
 	IsATemplate   *bool             `json:"is_a_template"`
+	IncludeVMs    bool              `json:"include_vms"`
 	Fields        []string          `json:"fields"`
 	PIFUUID       string            `json:"pif_uuid"`
 	Tag           int               `json:"tag"`
@@ -232,6 +233,12 @@ type params struct {
 // It always returns a valid result — errors become failed/rejected statuses.
 func (d *Dispatcher) Dispatch(ctx context.Context, env protocol.Envelope) protocol.Envelope {
 	start := time.Now()
+
+	if _, err := protocol.NormalizeVersion(env.V); err != nil {
+		d.logger.Warn("command rejected: unsupported protocol version",
+			zap.String("command_id", env.ID), zap.Int("v", env.V))
+		return d.reject(env, err.Error())
+	}
 
 	var cmd protocol.CommandPayload
 	if err := env.DecodePayload(&cmd); err != nil {
@@ -673,6 +680,8 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 			return nil, err
 		}
 		return d.xen.ObjectParamGet(ctx, "sr", sr, p.Param, p.ParamKey)
+	case "xenserver.inventory.snapshot":
+		return d.xen.InventorySnapshot(ctx, p.IncludeVMs)
 	case "xenserver.host.param_list":
 		return d.xen.HostParamList(ctx, p.UUID)
 	case "xenserver.vm.snapshot_promote":

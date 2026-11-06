@@ -52,3 +52,20 @@ func TestDryRunValidatesButNeverExecutes(t *testing.T) {
 		t.Fatal("xe was executed during dry run")
 	}
 }
+
+func TestUnsupportedProtocolVersionRejected(t *testing.T) {
+	d, _ := newAsyncDispatcher(t, false)
+	ctx := context.Background()
+
+	env := buildCommand(t, "xenserver.vm.list", nil)
+	env.V = 9
+	p, _ := decode(t, d.Dispatch(ctx, env))
+	if p.Status != protocol.StatusRejected || !strings.Contains(p.Message, "protocol version") {
+		t.Fatalf("v9: %+v", p)
+	}
+
+	env.V = 0 // omitted: treated as version 1
+	if p, _ = decode(t, d.Dispatch(ctx, env)); p.Status != protocol.StatusCompleted {
+		t.Fatalf("omitted v: %+v", p)
+	}
+}

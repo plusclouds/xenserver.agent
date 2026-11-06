@@ -12,8 +12,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AgentVersion is set at build time via -ldflags.
-const AgentVersion = "0.2.0"
+// AgentVersion is the build version. It is stamped at build time with
+// -ldflags "-X .../internal/config.AgentVersion=<version>" (see the Makefile);
+// a plain `go build` reports "dev".
+var AgentVersion = "dev"
 
 // Config is the top-level configuration structure for the agent.
 type Config struct {
@@ -297,6 +299,7 @@ func setDefaults(v *viper.Viper) {
 		"xenserver.sr.param_list",
 		"xenserver.sr.param_get",
 		"xenserver.host.param_list",
+		"xenserver.inventory.snapshot",
 		"xenserver.vdi.list",
 		"xenserver.ipmi.sensors",
 		"xenserver.metrics.rrd",

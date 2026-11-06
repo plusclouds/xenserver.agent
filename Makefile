@@ -1,4 +1,4 @@
-# PlusClouds Ubuntu Agent Makefile
+# PlusClouds Agent Makefile
 
 BINARY_AGENT   := plusclouds-agent
 BINARY_CTL     := plsctl
@@ -143,8 +143,8 @@ Section: utils\n\
 Priority: optional\n\
 Architecture: amd64\n\
 Maintainer: PlusClouds <support@plusclouds.com>\n\
-Description: PlusClouds Ubuntu VM Agent\n\
- A daemon for managing PlusClouds VMs via NATS.\n" > dist/deb/DEBIAN/control
+Description: PlusClouds XenServer and VM agent\n\
+ A daemon for managing XenServer hosts and VMs over NATS or HTTPS.\n" > dist/deb/DEBIAN/control
 	@printf "#!/bin/sh\n\
 set -e\n\
 mkdir -p /var/log/plusclouds\n\
