@@ -214,6 +214,7 @@ type params struct {
 	NameLabel     string            `json:"name_label"`
 	IsControlDom  *bool             `json:"is_control_domain"`
 	IsATemplate   *bool             `json:"is_a_template"`
+	IncludeVMs    bool              `json:"include_vms"`
 	Fields        []string          `json:"fields"`
 	PIFUUID       string            `json:"pif_uuid"`
 	Tag           int               `json:"tag"`
@@ -679,6 +680,8 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 			return nil, err
 		}
 		return d.xen.ObjectParamGet(ctx, "sr", sr, p.Param, p.ParamKey)
+	case "xenserver.inventory.snapshot":
+		return d.xen.InventorySnapshot(ctx, p.IncludeVMs)
 	case "xenserver.host.param_list":
 		return d.xen.HostParamList(ctx, p.UUID)
 	case "xenserver.vm.snapshot_promote":

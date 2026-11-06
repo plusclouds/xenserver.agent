@@ -33,6 +33,8 @@ func init() {
 			param("network_name", "string", false, "Network name-label."),
 			param("mac", "string", false, "MAC address aa:bb:cc:dd:ee:ff (generated if omitted)."),
 			param("mtu", "integer", false, "MTU 68-9216."))...)
+	add("xenserver.inventory.snapshot", "One-call read of the host and pool: pool (with host_count/is_pool_member), hosts, pifs, networks, vlans, srs and pbds, each as the full xe parameter list ({uuid, params, maps, sets}, xe-style keys, secrets masked). Optionally the guest VMs too.",
+		param("include_vms", "boolean", false, "Also include every guest VM's full parameter list (excludes control domains, templates and snapshots)."))
 	add("xenserver.vif.plug", "Hot-attach a network card to a running VM (needs guest tools). Create it first with xenserver.vif.create.", vifSel...)
 	add("xenserver.vif.unplug", "Hot-detach a network card from a running VM (needs guest tools); the card stays defined and can be plugged again or removed with xenserver.vif.remove.", vifSel...)
 	add("xenserver.vif.param_list", "All parameters of a network card as JSON (params, maps, sets).", vifSel...)

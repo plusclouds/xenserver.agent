@@ -248,13 +248,9 @@ func parseParamList(out string) (map[string]string, map[string]map[string]string
 			continue
 		}
 		left := strings.TrimSpace(line[:idx])
-		key := stripAnnotation(left)
+		key, ann := splitAnnotation(left)
 		if key == "" {
 			continue
-		}
-		ann := ""
-		if i := strings.LastIndex(left, "("); i >= 0 && strings.HasSuffix(left, ")") {
-			ann = strings.TrimSpace(left[i+1 : len(left)-1])
 		}
 		value := strings.TrimSpace(line[idx+1:])
 		switch {

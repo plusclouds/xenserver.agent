@@ -47,14 +47,32 @@ func parseXEBlocks(output string) []map[string]string {
 	return blocks
 }
 
-// stripAnnotation removes the trailing "( RO)"/"( RW)"/"( MRO)" style
-// annotation xe attaches to every field name and trims whitespace.
-func stripAnnotation(raw string) string {
+// splitAnnotation separates an xe field name from its trailing decorations:
+// the access annotation ("( RO)", "( RW)", "(MRO)", "(MRW)", "(SRO)", "(SRW)")
+// and any bracketed tag such as "[DEPRECATED]". It returns the bare name and
+// the trimmed annotation (e.g. "RO", "MRW"; empty when absent).
+func splitAnnotation(raw string) (name, annotation string) {
 	s := strings.TrimSpace(raw)
-	if i := strings.LastIndex(s, "("); i >= 0 && strings.HasSuffix(s, ")") {
+	// Bracketed tags come last: "PV-drivers-up-to-date ( RO) [DEPRECATED]".
+	for strings.HasSuffix(s, "]") {
+		i := strings.LastIndex(s, "[")
+		if i < 0 {
+			break
+		}
 		s = strings.TrimSpace(s[:i])
 	}
-	return s
+	if i := strings.LastIndex(s, "("); i >= 0 && strings.HasSuffix(s, ")") {
+		annotation = strings.TrimSpace(s[i+1 : len(s)-1])
+		s = strings.TrimSpace(s[:i])
+	}
+	return s, annotation
+}
+
+// stripAnnotation returns the bare xe field name, without the "( RO)"-style
+// access annotation or a "[DEPRECATED]" tag.
+func stripAnnotation(raw string) string {
+	name, _ := splitAnnotation(raw)
+	return name
 }
 
 // pickUUID resolves a name-label (or other filter) to exactly one uuid from

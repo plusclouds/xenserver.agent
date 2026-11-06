@@ -24,7 +24,7 @@ Reply: an envelope whose `payload` is
 - Every operation must be listed in the host's `allowed_operations`. Destructive ones (`*.destroy`, `unplug`) also need `confirm: true`.
 - `uuid`/`name` selectors: most VM operations take `uuid` or `name` (name must match exactly one VM).
 
-118 operations.
+119 operations.
 
 ### `agent.allowed_operations`
 
@@ -305,6 +305,14 @@ All parameters of a host as JSON. Defaults to this host.
 | param | type | required | description |
 |---|---|---|---|
 | `uuid` | string | no | Host uuid (default: this host). |
+
+### `xenserver.inventory.snapshot`
+
+One-call read of the host and pool: pool (with host_count/is_pool_member), hosts, pifs, networks, vlans, srs and pbds, each as the full xe parameter list ({uuid, params, maps, sets}, xe-style keys, secrets masked). Optionally the guest VMs too.
+
+| param | type | required | description |
+|---|---|---|---|
+| `include_vms` | boolean | no | Also include every guest VM's full parameter list (excludes control domains, templates and snapshots). |
 
 ### `xenserver.ipmi.sensors`
 

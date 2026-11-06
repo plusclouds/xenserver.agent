@@ -491,6 +491,7 @@ GEN_API_DOC=1 go test ./internal/publisher -run TestGenerateAPIDoc
 | [docs/https-api.md](docs/https-api.md) | HTTPS endpoint: auth, envelope, results, errors, async jobs, examples |
 | [docs/backups.md](docs/backups.md) | Snapshots, exports, restore, background jobs, NFS targets |
 | [docs/operations.md](docs/operations.md) | Every operation and parameter (generated) |
+| [docs/output-shapes.md](docs/output-shapes.md) | What the read operations return (summary vs full xe parameter shapes) |
 | [docs/protocol.md](docs/protocol.md) | Envelope, results, pushed messages, versioning |
 | [docs/overview.md](docs/overview.md) | Transports, NATS subjects, message flow |
 | [docs/security.md](docs/security.md) | Controls, hardening checklist, known limits |

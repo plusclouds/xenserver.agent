@@ -421,3 +421,56 @@ func TestFilterIPMIAndRRD(t *testing.T) {
 		t.Error("empty uuid must return the snapshot unchanged")
 	}
 }
+
+func TestSplitAnnotationStripsDecorations(t *testing.T) {
+	cases := []struct{ in, name, ann string }{
+		{"power-state ( RO)", "power-state", "RO"},
+		{"PV-drivers-up-to-date ( RO) [DEPRECATED]", "PV-drivers-up-to-date", "RO"},
+		{"VCPUs-params (MRW)", "VCPUs-params", "MRW"},
+		{"allowed-operations (SRO)", "allowed-operations", "SRO"},
+		{"uuid ( RO)", "uuid", "RO"},
+		{"plain", "plain", ""},
+		{"x ( RW) [DEPRECATED] [OTHER]", "x", "RW"},
+	}
+	for _, c := range cases {
+		n, a := splitAnnotation(c.in)
+		if n != c.name || a != c.ann {
+			t.Errorf("%q: got (%q,%q) want (%q,%q)", c.in, n, a, c.name, c.ann)
+		}
+	}
+}
+
+func TestParseParamListCleansKeys(t *testing.T) {
+	out := "uuid ( RO)    : abc\nPV-drivers-up-to-date ( RO) [DEPRECATED]: true\nother-config (MRW): a: 1; b: 2\nallowed-operations (SRO): start; stop\n"
+	p, m, s := parseParamList(out)
+	if p["PV-drivers-up-to-date"] != "true" || p["uuid"] != "abc" {
+		t.Fatalf("params: %v", p)
+	}
+	for k := range p {
+		if strings.ContainsAny(k, "()[] ") {
+			t.Errorf("junk in key %q", k)
+		}
+	}
+	if m["other-config"]["b"] != "2" || len(s["allowed-operations"]) != 2 {
+		t.Fatalf("maps %v sets %v", m, s)
+	}
+}
+
+func TestSplitParamListBlocksMasksAndCleans(t *testing.T) {
+	out := "uuid ( RO)                : pbd-1\n" +
+		"           currently-attached ( RO): true\n" +
+		"            device-config (MRO): server: nas; password: hunter2; serverpath: /x\n" +
+		"\n\n" +
+		"uuid ( RO)                : pbd-2\n" +
+		"  PV-drivers-up-to-date ( RO) [DEPRECATED]: true\n"
+	lists := splitParamListBlocks(out)
+	if len(lists) != 2 || lists[0].UUID != "pbd-1" || lists[1].UUID != "pbd-2" {
+		t.Fatalf("blocks: %+v", lists)
+	}
+	if lists[0].Maps["device-config"]["password"] != "***" || lists[0].Maps["device-config"]["server"] != "nas" {
+		t.Fatalf("masking: %+v", lists[0].Maps)
+	}
+	if lists[1].Params["PV-drivers-up-to-date"] != "true" {
+		t.Fatalf("clean key: %+v", lists[1].Params)
+	}
+}
