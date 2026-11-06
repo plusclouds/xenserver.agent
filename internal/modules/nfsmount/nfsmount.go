@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,10 @@ func (m *Module) Mount(ctx context.Context, server, exportPath, mountPoint, opti
 		return nil, fmt.Errorf("server, export_path, and mount_point are required")
 	}
 
+	if err := validateMountArgs(server, exportPath, mountPoint, options); err != nil {
+		return nil, err
+	}
+
 	if err := os.MkdirAll(mountPoint, 0755); err != nil {
 		return &ActionResult{Operation: "mount", Target: mountPoint, Success: false,
 			Message: fmt.Sprintf("creating mount point: %s", err)}, nil
@@ -65,7 +70,7 @@ func (m *Module) Mount(ctx context.Context, server, exportPath, mountPoint, opti
 	if options != "" {
 		args = append(args, "-o", options)
 	}
-	args = append(args, source, mountPoint)
+	args = append(args, "--", source, mountPoint)
 
 	_, stderr, err := m.exec.Execute(ctx, m.mountBinary, args...)
 	if err != nil {
@@ -81,7 +86,10 @@ func (m *Module) Unmount(ctx context.Context, mountPoint string) (*ActionResult,
 	if mountPoint == "" {
 		return nil, fmt.Errorf("mount_point is required")
 	}
-	_, stderr, err := m.exec.Execute(ctx, m.umountBinary, mountPoint)
+	if err := validateMountPoint(mountPoint); err != nil {
+		return nil, err
+	}
+	_, stderr, err := m.exec.Execute(ctx, m.umountBinary, "--", mountPoint)
 	if err != nil {
 		return &ActionResult{Operation: "unmount", Target: mountPoint, Success: false,
 			Message: firstNonEmpty(strings.TrimSpace(stderr), err.Error())}, nil
@@ -215,4 +223,37 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+var (
+	hostRe    = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.:-]*[A-Za-z0-9])?$`)
+	optionsRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_=.,:/-]*$`)
+)
+
+func validateMountPoint(mountPoint string) error {
+	if !filepath.IsAbs(mountPoint) {
+		return fmt.Errorf("mount_point %q must be an absolute path", mountPoint)
+	}
+	if strings.ContainsAny(mountPoint, "\x00\n") {
+		return fmt.Errorf("mount_point contains invalid characters")
+	}
+	return nil
+}
+
+// validateMountArgs rejects values that mount(8) could read as options or that
+// are not a plausible NFS server, export path or mount option list.
+func validateMountArgs(server, exportPath, mountPoint, options string) error {
+	if !hostRe.MatchString(server) {
+		return fmt.Errorf("server %q must be a hostname or IP address", server)
+	}
+	if !strings.HasPrefix(exportPath, "/") || strings.ContainsAny(exportPath, "\x00\n") {
+		return fmt.Errorf("export_path %q must be an absolute path", exportPath)
+	}
+	if err := validateMountPoint(mountPoint); err != nil {
+		return err
+	}
+	if options != "" && !optionsRe.MatchString(options) {
+		return fmt.Errorf("mount options %q contain invalid characters (allowed: letters, digits, and _ = . , : / -)", options)
+	}
+	return nil
 }

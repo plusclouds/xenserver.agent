@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -44,6 +45,9 @@ type Server struct {
 func New(cfg config.HTTPConfig, disp Dispatcher, token, agentUUID string, logger *zap.Logger) (*Server, error) {
 	if token == "" {
 		return nil, errors.New("http server requires a non-empty api_key for bearer authentication")
+	}
+	if err := CheckToken(token); err != nil {
+		return nil, err
 	}
 	s := &Server{cfg: cfg, disp: disp, token: []byte(token), agentUUID: agentUUID, logger: logger}
 
@@ -133,4 +137,19 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// MinTokenLength is the shortest bearer token the HTTPS server accepts.
+const MinTokenLength = 32
+
+// CheckToken refuses placeholder and short tokens so a sample config copied
+// without editing cannot expose the API.
+func CheckToken(token string) error {
+	if strings.HasPrefix(strings.ToUpper(token), "CHANGE_ME") {
+		return errors.New("http api_key is still the placeholder; set a long random token")
+	}
+	if len(token) < MinTokenLength {
+		return fmt.Errorf("http api_key is too short (%d chars); use at least %d random characters", len(token), MinTokenLength)
+	}
+	return nil
 }
