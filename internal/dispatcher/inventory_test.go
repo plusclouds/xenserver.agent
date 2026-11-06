@@ -19,13 +19,15 @@ import (
 const inventoryXe = `#!/bin/bash
 cmd="$1"; shift
 case "$cmd" in
+  host-list)
+    if [[ "$*" == *--minimal* ]]; then echo "host-1,host-2"; else printf 'uuid ( RO)           : host-1\n          name-label ( RW): n\n  PV-drivers-up-to-date ( RO) [DEPRECATED]: true\n'; fi ;;
   pool-list) printf 'uuid ( RO)           : pool-1\n          name-label ( RW): p\n              master ( RO): host-1\n          ha-enabled ( RO): false\n' ;;
-  host-list) echo "host-1,host-2" ;;
-  host-param-list|pif-param-list|network-param-list|vlan-param-list|sr-param-list)
+  pif-list|network-list|vlan-list|sr-list)
+    if [[ "$*" != *params=all* ]]; then echo "need params=all" >&2; exit 1; fi
     printf 'uuid ( RO)           : %s-1\n          name-label ( RW): n\n  PV-drivers-up-to-date ( RO) [DEPRECATED]: true\n' "${cmd%%-*}" ;;
-  pbd-param-list)
+  pbd-list)
     printf 'uuid ( RO)           : pbd-1\n       device-config (MRO): server: nas; password: s3cret\n' ;;
-  vm-param-list) printf 'uuid ( RO)           : vm-1\n' ;;
+  vm-list) printf 'uuid ( RO)           : vm-1\n' ;;
   *) echo "unhandled xe: $cmd" >&2; exit 1 ;;
 esac
 `

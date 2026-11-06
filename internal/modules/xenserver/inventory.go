@@ -22,17 +22,19 @@ type Inventory struct {
 	VMs []ParamList `json:"vms,omitempty"`
 }
 
-// classParamLists runs "xe <class>-param-list [filters]" without a uuid, which
-// lists every object of the class, and structures each block.
+// classParamLists runs "xe <class>-list params=all [filters]", which prints
+// every object of the class with all its parameters in the same annotated
+// format as <class>-param-list (that command itself needs a uuid), and
+// structures each block.
 func (m *Module) classParamLists(ctx context.Context, class string, filters ...string) ([]ParamList, error) {
-	out, err := m.runTimeout(ctx, timeoutMedium, append([]string{class + "-param-list"}, filters...)...)
+	out, err := m.runTimeout(ctx, timeoutMedium, append(append([]string{class + "-list"}, filters...), "params=all")...)
 	if err != nil {
 		return nil, fmt.Errorf("listing %s parameters: %w", class, err)
 	}
 	return splitParamListBlocks(out), nil
 }
 
-// splitParamListBlocks splits bulk "xe <class>-param-list" output (objects
+// splitParamListBlocks splits bulk "xe <class>-list params=all" output (objects
 // separated by blank lines) into structured, secret-masked parameter lists.
 func splitParamListBlocks(out string) []ParamList {
 	lists := []ParamList{}
