@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,8 +53,8 @@ func New(cfg config.HTTPConfig, disp Dispatcher, token, agentUUID string, logger
 	s := &Server{cfg: cfg, disp: disp, token: []byte(token), agentUUID: agentUUID, logger: logger}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/v1/command", s.auth(s.handleCommand))
+	mux.HandleFunc("/healthz", versionHeaders(s.handleHealth))
+	mux.HandleFunc("/v1/command", versionHeaders(s.auth(s.handleCommand)))
 	s.srv = &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           mux,
@@ -106,7 +107,12 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "agent_uuid": s.agentUUID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":            "ok",
+		"agent_uuid":        s.agentUUID,
+		"agent_version":     config.AgentVersion,
+		"protocol_versions": protocol.SupportedVersions,
+	})
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -126,11 +132,24 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	// the command was accepted as a background job (params.async).
 	result := s.disp.Dispatch(r.Context(), env)
 	code := http.StatusOK
+	if _, verr := protocol.NormalizeVersion(env.V); verr != nil {
+		code = http.StatusBadRequest // unsupported protocol version; body explains
+	}
 	var rp protocol.ResultPayload
 	if json.Unmarshal(result.Payload, &rp) == nil && rp.Status == protocol.StatusAccepted {
 		code = http.StatusAccepted // long operation started in the background
 	}
 	writeJSON(w, code, result)
+}
+
+// versionHeaders stamps every response with the agent build and the newest
+// protocol version it speaks.
+func versionHeaders(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Agent-Version", config.AgentVersion)
+		w.Header().Set("X-Protocol-Version", strconv.Itoa(protocol.CurrentVersion))
+		next(w, r)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

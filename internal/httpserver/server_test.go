@@ -167,3 +167,30 @@ func TestWeakTokensRefused(t *testing.T) {
 		t.Errorf("long token refused: %v", err)
 	}
 }
+
+func TestVersionHeadersHealthAndRejection(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var h map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&h)
+	if resp.Header.Get("X-Protocol-Version") != "1" || resp.Header.Get("X-Agent-Version") == "" {
+		t.Fatalf("missing version headers: %v", resp.Header)
+	}
+	if _, ok := h["agent_version"]; !ok || h["protocol_versions"] == nil {
+		t.Fatalf("healthz lacks versions: %v", h)
+	}
+
+	body, _ := json.Marshal(protocol.Envelope{V: 7, ID: "1", Type: "command"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/command", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unsupported version: got %d, want 400", resp.StatusCode)
+	}
+}

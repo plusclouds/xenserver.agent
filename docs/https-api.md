@@ -45,10 +45,20 @@ Leave `nats.enabled` at `true` to run both transports side by side.
 
 | Method and path | Auth | Purpose |
 |---|---|---|
-| `GET /healthz` | none | Liveness: `{"status":"ok","agent_uuid":"…"}` |
+| `GET /healthz` | none | Liveness and version: `{"status":"ok","agent_uuid":"…","agent_version":"v1.2.0","protocol_versions":[1]}` |
 | `POST /v1/command` | `Authorization: Bearer <api_key>` | Run one operation |
 
 Requests are limited to 1 MiB. A wrong or missing token returns `401`. Other methods on `/v1/command` return `405`.
+
+## Versioning
+
+Every request envelope carries `"v"`, the protocol version (currently `1`). Send it explicitly; an omitted `v` is treated as 1. Any other value is rejected with HTTP 400 and `payload.status: "rejected"`:
+
+```json
+{"payload":{"status":"rejected","message":"unsupported protocol version 2; this agent supports [1]"}}
+```
+
+The result envelope echoes the request's `v`. To discover what an agent speaks before sending commands, call `GET /healthz` (`agent_version`, `protocol_versions`). Every response, including errors, also carries `X-Agent-Version` and `X-Protocol-Version` headers. The URL path (`/v1/command`) names the endpoint generation; `v` is the message-format version. See [protocol.md](protocol.md#versioning).
 
 ## Calling an operation
 
@@ -159,6 +169,7 @@ Typical times on a XenServer 8.2 host over a LAN: reads 0.1–0.6 s; start of a 
 | Connection refused / timeout | Agent not running, `http.enabled` false, wrong `listen`, firewall |
 | Agent exits at start naming `api_key` | Token empty, placeholder or under 32 characters |
 | `401` | Wrong or missing `Authorization: Bearer` token |
+| `400` with `unsupported protocol version` | `v` is not one of `protocol_versions` from `/healthz` |
 | `rejected … not permitted on this agent` | Operation missing from `allowed_operations` |
 | Certificate error | Name not in `http.hosts`, or the certificate was regenerated; re-pin |
 | `status: accepted` never finishes | Check `agent.job.status`; jobs do not survive an agent restart |

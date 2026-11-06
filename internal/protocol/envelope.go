@@ -32,6 +32,27 @@ const (
 	StatusAccepted = "accepted"
 )
 
+// CurrentVersion is the newest protocol version this agent speaks.
+const CurrentVersion = 1
+
+// SupportedVersions lists every protocol version the agent accepts.
+var SupportedVersions = []int{1}
+
+// NormalizeVersion validates the envelope version of a request. An omitted
+// version (0) is treated as version 1 so existing callers keep working; any
+// other value must be in SupportedVersions.
+func NormalizeVersion(v int) (int, error) {
+	if v == 0 {
+		return 1, nil
+	}
+	for _, s := range SupportedVersions {
+		if v == s {
+			return v, nil
+		}
+	}
+	return 0, fmt.Errorf("unsupported protocol version %d; this agent supports %v", v, SupportedVersions)
+}
+
 // Envelope is the top-level wrapper for every NATS message in both directions.
 type Envelope struct {
 	V         int    `json:"v"`
@@ -137,12 +158,18 @@ func (e *Envelope) DecodePayload(dst any) error {
 
 // ResultFor constructs a result Envelope that echoes back the command ID from src.
 func ResultFor(src Envelope, agentUUID, status, message string, output any) (Envelope, error) {
-	return New(agentUUID, TypeResult, ResultPayload{
+	env, err := New(agentUUID, TypeResult, ResultPayload{
 		CommandID: src.ID,
 		Status:    status,
 		Message:   message,
 		Output:    output,
 	})
+	// Echo the request's version when it is one we speak, so a caller sees the
+	// version its answer is in.
+	if v, verr := NormalizeVersion(src.V); verr == nil {
+		env.V = v
+	}
+	return env, err
 }
 
 // newUUID generates a random UUID v4 string.

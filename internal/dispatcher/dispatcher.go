@@ -233,6 +233,12 @@ type params struct {
 func (d *Dispatcher) Dispatch(ctx context.Context, env protocol.Envelope) protocol.Envelope {
 	start := time.Now()
 
+	if _, err := protocol.NormalizeVersion(env.V); err != nil {
+		d.logger.Warn("command rejected: unsupported protocol version",
+			zap.String("command_id", env.ID), zap.Int("v", env.V))
+		return d.reject(env, err.Error())
+	}
+
 	var cmd protocol.CommandPayload
 	if err := env.DecodePayload(&cmd); err != nil {
 		d.logger.Error("→ command received: could not decode payload",
