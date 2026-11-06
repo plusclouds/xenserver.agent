@@ -24,7 +24,7 @@ nats:
 #   GET  /healthz     — unauthenticated liveness
 # Same allowed_operations allowlist applies as for NATS.
 http:
-  enabled: true
+  enabled: false
   listen: "10.1.32.70:8443"
   # With self_signed: true, a cert is generated at these paths on first start
   # and reused (renewed 30 days before expiry). Existing certs are never overwritten.
@@ -75,7 +75,7 @@ agent:
     - system.update
     - telemetry.set_interval
     # Uncomment to allow arbitrary command execution (see allowed_commands below)
-    - exec
+    # - exec
     # - vm.reboot
     # - vm.shutdown
 

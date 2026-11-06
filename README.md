@@ -565,6 +565,6 @@ Jobs live in memory only: they are lost on agent restart, and a job running at s
 
 Disabled by default. Set `http.enabled: true` in `agent.yaml` to expose the dispatcher over HTTPS next to NATS.
 
-- `POST /v1/command` — body is the command envelope, header `Authorization: Bearer <api_key>`. Returns the result envelope (HTTP 200; outcome in `payload.status`). Same `allowed_operations` allowlist as NATS.
+- `POST /v1/command` — body is the command envelope, header `Authorization: Bearer <api_key>`. Returns the result envelope (HTTP 200; outcome in `payload.status`). Same `allowed_operations` allowlist as NATS. The server refuses to start if `http.api_key` is shorter than 32 characters or still the `CHANGE_ME…` placeholder.
 - `GET /healthz` — unauthenticated liveness.
 - TLS: with `http.self_signed: true` an ECDSA P-256 cert is generated at `http.cert_file`/`http.key_file` on first start, reused afterwards and renewed 30 days before expiry. Existing certs are never overwritten. The SHA-256 fingerprint is logged at startup; pin it on the client (`curl -k` or `--pinnedpubkey`). Add extra SANs via `http.hosts`.

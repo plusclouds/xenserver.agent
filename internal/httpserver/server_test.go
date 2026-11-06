@@ -27,7 +27,7 @@ func (fakeDisp) Dispatch(_ context.Context, env protocol.Envelope) protocol.Enve
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	s, err := New(config.HTTPConfig{Listen: "127.0.0.1:0"}, fakeDisp{}, "secret", "uuid", zap.NewNop())
+	s, err := New(config.HTTPConfig{Listen: "127.0.0.1:0"}, fakeDisp{}, testToken, "uuid", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestAuthAndDispatch(t *testing.T) {
 	}
 
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/v1/command", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Authorization", "Bearer "+testToken)
 	resp, _ = http.DefaultClient.Do(req)
 	var out protocol.Envelope
 	_ = json.NewDecoder(resp.Body).Decode(&out)
@@ -99,7 +99,7 @@ func (acceptedDisp) Dispatch(_ context.Context, env protocol.Envelope) protocol.
 }
 
 func TestAcceptedResultReturns202(t *testing.T) {
-	s, err := New(config.HTTPConfig{Listen: "127.0.0.1:0"}, acceptedDisp{}, "secret", "uuid", zap.NewNop())
+	s, err := New(config.HTTPConfig{Listen: "127.0.0.1:0"}, acceptedDisp{}, testToken, "uuid", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestAcceptedResultReturns202(t *testing.T) {
 	defer ts.Close()
 	body, _ := json.Marshal(protocol.Envelope{ID: "1", Type: "command"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/command", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer secret")
+	req.Header.Set("Authorization", "Bearer "+testToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("want 202, got %v / %v", resp, err)
@@ -152,5 +152,18 @@ func TestSelfSignedRenewalAndOperatorCertUntouched(t *testing.T) {
 	again, _, _ := LoadOrCreateCert(cert, key, true, nil)
 	if string(renewed.Certificate[0]) != string(again.Certificate[0]) {
 		t.Fatal("a fresh cert must be reused")
+	}
+}
+
+const testToken = "0123456789abcdef0123456789abcdef-test-token"
+
+func TestWeakTokensRefused(t *testing.T) {
+	for _, tok := range []string{"secret", "CHANGE_ME_GENERATE_A_LONG_RANDOM_TOKEN", "change_me_" + testToken, "short-token-31-chars-xxxxxxxxxx"[:31]} {
+		if _, err := New(config.HTTPConfig{}, fakeDisp{}, tok, "u", zap.NewNop()); err == nil {
+			t.Errorf("token %q should be refused", tok)
+		}
+	}
+	if _, err := New(config.HTTPConfig{}, fakeDisp{}, testToken, "u", zap.NewNop()); err != nil {
+		t.Errorf("long token refused: %v", err)
 	}
 }
