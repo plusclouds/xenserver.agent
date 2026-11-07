@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -23,8 +24,26 @@ type callbackParam struct {
 
 // SetCallbackAllowedURLs sets the URL prefixes callbacks may target. With none
 // configured, callbacks are refused: an agent must not be an open relay that
-// POSTs to arbitrary addresses on behalf of a caller.
-func (d *Dispatcher) SetCallbackAllowedURLs(prefixes []string) { d.callbackPrefixes = prefixes }
+// POSTs to arbitrary addresses on behalf of a caller. Each prefix must be an
+// https URL whose path ends in "/" (for example https://host/api/callbacks/);
+// invalid prefixes are rejected and reported by the returned error.
+func (d *Dispatcher) SetCallbackAllowedURLs(prefixes []string) error {
+	d.callbackPrefixes = nil
+	for _, p := range prefixes {
+		u, err := url.Parse(p)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("agent.callback_allowed_urls entry %q must be an https URL without credentials, query or fragment", p)
+		}
+		if !strings.HasSuffix(u.Path, "/") {
+			return fmt.Errorf("agent.callback_allowed_urls entry %q must end with '/'", p)
+		}
+		d.callbackPrefixes = append(d.callbackPrefixes, p)
+	}
+	return nil
+}
+
+// SetCallbackRetryDelay sets the first retry delay (tests).
+func (d *Dispatcher) SetCallbackRetryDelay(v time.Duration) { d.callbackRetryDelay = v }
 
 // SetCallbackHTTPClient overrides the HTTP client used for callbacks (tests).
 func (d *Dispatcher) SetCallbackHTTPClient(c *http.Client) { d.callbackClient = c }
@@ -38,15 +57,35 @@ func (d *Dispatcher) checkCallback(cb *callbackParam) error {
 		return fmt.Errorf("callbacks are not enabled on this agent (agent.callback_allowed_urls is empty)")
 	}
 	u, err := url.Parse(cb.URL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
 		return fmt.Errorf("callback url must be an https URL without credentials")
 	}
+	reqPath := path.Clean("/" + u.Path)
+	if !strings.HasSuffix(reqPath, "/") {
+		reqPath += "/"
+	}
 	for _, pre := range d.callbackPrefixes {
-		if strings.HasPrefix(cb.URL, pre) {
+		pu, perr := url.Parse(pre)
+		if perr != nil {
+			continue
+		}
+		// Exact host and port (so "good.example.com.evil.net" and
+		// "good.example.com@evil.net" never match), then a path-segment prefix
+		// on the cleaned path (so "/api/callbacks/../admin" cannot escape).
+		if strings.EqualFold(strings.TrimSuffix(u.Hostname(), "."), strings.TrimSuffix(pu.Hostname(), ".")) &&
+			effectivePort(u) == effectivePort(pu) &&
+			strings.HasPrefix(reqPath, pu.Path) {
 			return nil
 		}
 	}
 	return fmt.Errorf("callback url is not under any agent.callback_allowed_urls prefix")
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	return "443"
 }
 
 // sendCallback POSTs the finished job to the callback URL, retrying a few
@@ -70,6 +109,11 @@ func (d *Dispatcher) sendCallback(cb callbackParam, j jobs.Job) {
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
+	// Never follow redirects: an allowed host must not be able to bounce the
+	// agent (with its bearer token) to an address outside the allowlist.
+	c := *client
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client = &c
 	delay := d.callbackRetryDelay
 	if delay == 0 {
 		delay = 2 * time.Second

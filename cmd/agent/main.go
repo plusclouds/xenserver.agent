@@ -166,7 +166,9 @@ func run(_ *cobra.Command, _ []string) error {
 	jobMgr := jobs.New(logger, cfg.Agent.MaxJobs, 100)
 	defer jobMgr.Shutdown()
 	disp.SetDryRun(cfg.Agent.DryRun)
-	disp.SetCallbackAllowedURLs(cfg.Agent.CallbackAllowedURLs)
+	if err := disp.SetCallbackAllowedURLs(cfg.Agent.CallbackAllowedURLs); err != nil {
+		return err
+	}
 	disp.SetJobs(jobMgr)
 
 	// ------------------------------------------------------------------ //

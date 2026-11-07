@@ -2,7 +2,10 @@ package xenserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -97,36 +100,44 @@ func (m *Module) ISOCreate(ctx context.Context, srUUID, name string, files map[s
 		return nil, err
 	}
 	target := filepath.Join(dir, name)
-	if _, err := os.Stat(target); err == nil && !overwrite {
-		return nil, fmt.Errorf("%s already exists in the ISO library; pass overwrite=true to replace it", name)
+	if fi, err := os.Lstat(target); err == nil {
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s exists in the ISO library and is not a regular file; refusing to touch it", name)
+		}
+		if !overwrite {
+			return nil, fmt.Errorf("%s already exists in the ISO library; pass overwrite=true to replace it", name)
+		}
 	}
 
-	// Stage the files in a private temp dir, build next to the target under a
-	// dotted temporary name (ignored by the SR scan), then rename into place.
+	// Build everything in a private staging directory (0700), then copy the
+	// finished image into the library with O_EXCL|O_NOFOLLOW under a random
+	// dotted name (ignored by the SR scan) and rename it into place. Nothing in
+	// the shared library directory is ever opened by path as root except that
+	// exclusive create, so a planted symlink cannot redirect a write.
 	stage, err := os.MkdirTemp("", "plusclouds-iso-")
 	if err != nil {
 		return nil, fmt.Errorf("creating staging directory: %w", err)
 	}
 	defer os.RemoveAll(stage)
+	srcDir := filepath.Join(stage, "src")
+	if err := os.Mkdir(srcDir, 0o700); err != nil {
+		return nil, fmt.Errorf("creating staging directory: %w", err)
+	}
 	names := make([]string, 0, len(files))
 	for fn, content := range files {
-		if err := os.WriteFile(filepath.Join(stage, fn), []byte(content), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(srcDir, fn), []byte(content), 0o600); err != nil {
 			return nil, fmt.Errorf("staging %s: %w", fn, err)
 		}
 		names = append(names, fn)
 	}
 	sort.Strings(names)
-	tmp := filepath.Join(dir, "."+name+".tmp")
-	defer os.Remove(tmp)
-	if _, stderr, err := m.exec.Execute(ctx, tool, "-quiet", "-input-charset", "utf-8", "-o", tmp, "-V", label, "-J", "-R", stage); err != nil {
+	built := filepath.Join(stage, "image.iso")
+	if _, stderr, err := m.exec.Execute(ctx, tool, "-quiet", "-input-charset", "utf-8", "-o", built, "-V", label, "-J", "-R", srcDir); err != nil {
 		return &ActionResult{Operation: "iso-create", Target: name, Success: false,
 			Message: fmt.Sprintf("building the ISO failed: %s", firstNonEmptyStr(strings.TrimSpace(stderr), err.Error()))}, nil
 	}
-	if err := os.Chmod(tmp, 0o644); err != nil {
-		return nil, fmt.Errorf("setting permissions on the ISO: %w", err)
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		return nil, fmt.Errorf("placing the ISO in the library: %w", err)
+	if err := installISO(built, dir, name); err != nil {
+		return nil, err
 	}
 	if _, err := m.runTimeout(ctx, timeoutMedium, "sr-scan", "uuid="+srUUID); err != nil {
 		r := m.failure("iso-create", name, err)
@@ -161,8 +172,12 @@ func (m *Module) ISORemove(ctx context.Context, srUUID, name string, confirm boo
 		return nil, err
 	}
 	target := filepath.Join(dir, name)
-	if _, err := os.Stat(target); err != nil {
+	fi, err := os.Lstat(target)
+	if err != nil {
 		return nil, fmt.Errorf("%s does not exist in the ISO library", name)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file; refusing to delete it", name)
 	}
 	if out, err := m.run(ctx, "vdi-list", "sr-uuid="+srUUID, "name-label="+name, "params=uuid", "--minimal"); err == nil {
 		for _, vdi := range splitMinimalList(out) {
@@ -188,4 +203,45 @@ func firstNonEmptyStr(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// installISO copies the built image into dir as name without ever following a
+// symlink: exclusive create (O_EXCL|O_NOFOLLOW) of a random temporary file,
+// fchmod on the open descriptor, then an atomic rename.
+func installISO(built, dir, name string) error {
+	src, err := os.Open(built)
+	if err != nil {
+		return fmt.Errorf("reading the built ISO: %w", err)
+	}
+	defer src.Close()
+	var rnd [8]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return fmt.Errorf("generating a temporary name: %w", err)
+	}
+	tmp := filepath.Join(dir, "."+name+"."+hex.EncodeToString(rnd[:])+".tmp")
+	dst, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|oNoFollow, 0o644)
+	if err != nil {
+		return fmt.Errorf("creating the ISO in the library: %w", err)
+	}
+	ok := false
+	defer func() {
+		dst.Close()
+		if !ok {
+			os.Remove(tmp)
+		}
+	}()
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("writing the ISO: %w", err)
+	}
+	if err := dst.Chmod(0o644); err != nil {
+		return fmt.Errorf("setting permissions on the ISO: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("closing the ISO: %w", err)
+	}
+	if err := os.Rename(tmp, filepath.Join(dir, name)); err != nil {
+		return fmt.Errorf("placing the ISO in the library: %w", err)
+	}
+	ok = true
+	return nil
 }

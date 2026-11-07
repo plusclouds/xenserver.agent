@@ -195,18 +195,22 @@ func TestAsyncCallback(t *testing.T) {
 	}
 
 	// No allowlist configured: refused.
-	if p, _ := decode(t, e.d.Dispatch(context.Background(), cmd(map[string]any{"url": srv.URL + "/done", "token": "t"}))); p.Status != protocol.StatusRejected {
+	if p, _ := decode(t, e.d.Dispatch(context.Background(), cmd(map[string]any{"url": srv.URL + "/api/cb/done", "token": "t"}))); p.Status != protocol.StatusRejected {
 		t.Fatalf("callbacks must be off by default: %s", p.Status)
 	}
-	e.d.SetCallbackAllowedURLs([]string{srv.URL + "/"})
+	if err := e.d.SetCallbackAllowedURLs([]string{srv.URL + "/api/cb/"}); err != nil {
+		t.Fatal(err)
+	}
 	e.d.SetCallbackHTTPClient(srv.Client())
 	// Outside the allowlist and non-https: refused.
-	for _, u := range []string{"https://evil.example/done", "http://127.0.0.1/done"} {
+	for _, u := range []string{"https://evil.example/done", "http://127.0.0.1/done",
+		srv.URL + ".evil.net/done", "https://user:pw@" + strings.TrimPrefix(srv.URL, "https://") + "/done",
+		srv.URL + "/api/cb/../admin", srv.URL + "/api/cbx/done", srv.URL + "/", srv.URL} {
 		if p, _ := decode(t, e.d.Dispatch(context.Background(), cmd(map[string]any{"url": u}))); p.Status != protocol.StatusRejected {
 			t.Fatalf("%s: want rejected, got %s", u, p.Status)
 		}
 	}
-	p, _ := decode(t, e.d.Dispatch(context.Background(), cmd(map[string]any{"url": srv.URL + "/done", "token": "secret-token"})))
+	p, _ := decode(t, e.d.Dispatch(context.Background(), cmd(map[string]any{"url": srv.URL + "/api/cb/done", "token": "secret-token"})))
 	if p.Status != protocol.StatusAccepted {
 		t.Fatalf("accepted expected: %+v", p)
 	}
@@ -223,5 +227,45 @@ func TestAsyncCallback(t *testing.T) {
 	res := got["result"].(map[string]any)
 	if res["data"].(map[string]any)["uuid"] != "new-vm-uuid" {
 		t.Fatalf("result: %v", res)
+	}
+}
+
+func TestCallbackPrefixValidation(t *testing.T) {
+	e := newProvDispatcher(t)
+	for _, bad := range []string{"http://x.example/cb/", "https://x.example/cb", "https://u:p@x.example/cb/", "https://x.example/cb/?a=1", "ftp://x/"} {
+		if err := e.d.SetCallbackAllowedURLs([]string{bad}); err == nil {
+			t.Errorf("prefix %q accepted", bad)
+		}
+	}
+	if err := e.d.SetCallbackAllowedURLs([]string{"https://x.example/cb/"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCallbackDoesNotFollowRedirects(t *testing.T) {
+	e := newProvDispatcher(t, "xenserver.vm.import")
+	img := filepath.Join(e.dir, "image.xva")
+	os.WriteFile(img, []byte("data"), 0o644)
+	hit := make(chan struct{}, 1)
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit <- struct{}{} }))
+	defer target.Close()
+	redirector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/internal", http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+	if err := e.d.SetCallbackAllowedURLs([]string{redirector.URL + "/cb/"}); err != nil {
+		t.Fatal(err)
+	}
+	e.d.SetCallbackHTTPClient(redirector.Client())
+	e.d.SetCallbackRetryDelay(10 * time.Millisecond)
+	p, _ := decode(t, e.d.Dispatch(context.Background(), buildCommand(t, "xenserver.vm.import",
+		map[string]any{"filename": img, "async": true, "callback": map[string]any{"url": redirector.URL + "/cb/x", "token": "t"}})))
+	if p.Status != protocol.StatusAccepted {
+		t.Fatalf("%+v", p)
+	}
+	select {
+	case <-hit:
+		t.Fatal("callback followed a redirect outside the allowlist")
+	case <-time.After(1500 * time.Millisecond):
 	}
 }

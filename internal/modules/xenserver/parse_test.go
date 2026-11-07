@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -472,5 +473,30 @@ func TestSplitParamListBlocksMasksAndCleans(t *testing.T) {
 	}
 	if lists[1].Params["PV-drivers-up-to-date"] != "true" {
 		t.Fatalf("clean key: %+v", lists[1].Params)
+	}
+}
+
+func TestInstallISORefusesSymlinkedTemp(t *testing.T) {
+	dir := t.TempDir()
+	built := filepath.Join(dir, "built.iso")
+	os.WriteFile(built, []byte("iso"), 0o644)
+	lib := filepath.Join(dir, "lib")
+	os.Mkdir(lib, 0o755)
+	if err := installISO(built, lib, "a.iso"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(lib, "a.iso")); string(b) != "iso" {
+		t.Fatalf("content %q", b)
+	}
+	// A symlink planted at the final name is replaced, never written through.
+	victim := filepath.Join(dir, "victim")
+	os.WriteFile(victim, []byte("keep"), 0o644)
+	os.Remove(filepath.Join(lib, "a.iso"))
+	os.Symlink(victim, filepath.Join(lib, "a.iso"))
+	if err := installISO(built, lib, "a.iso"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "keep" {
+		t.Fatalf("symlink target was overwritten: %q", b)
 	}
 }
