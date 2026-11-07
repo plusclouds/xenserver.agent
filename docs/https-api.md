@@ -131,6 +131,8 @@ Branch on `output.detail.error_code` (the xapi error code) when you need to auto
 
 Operations such as `vm.destroy`, `vdi.destroy`, `network.destroy`, `vlan.destroy`, `sr.remove` and `pif.unplug` need `"confirm": true`. Without it the call is rejected and nothing happens.
 
+`vm.destroy` also needs `"expected_name"`: the VM's exact current name-label. If it differs from the real name (for example a wrong uuid), the delete is refused.
+
 ## Background jobs
 
 Add `"async": true` to a long operation (see the list in the README). The reply is HTTP 202:

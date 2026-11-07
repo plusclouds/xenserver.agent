@@ -193,6 +193,7 @@ type params struct {
 	MountOptions  string            `json:"mount_options"`
 	Async         bool              `json:"async"`
 	NewName       string            `json:"new_name"`
+	ExpectedName  string            `json:"expected_name"`
 	Set           map[string]string `json:"set"`
 	Unset         []string          `json:"unset"`
 	Param         string            `json:"param"`
@@ -614,7 +615,7 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 	case "xenserver.vm.clone":
 		return d.xen.VMClone(ctx, p.UUID, p.Name, p.NewName, p.Description)
 	case "xenserver.vm.destroy":
-		return d.xen.VMDestroy(ctx, p.UUID, p.Name, p.Confirm)
+		return d.xen.VMDestroy(ctx, p.UUID, p.Name, p.Confirm, p.ExpectedName)
 	case "xenserver.vm.pause":
 		return d.xen.VMPause(ctx, p.UUID, p.Name)
 	case "xenserver.vm.unpause":

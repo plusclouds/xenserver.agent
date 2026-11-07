@@ -213,7 +213,20 @@ func TestCreateCloneDestroyPause(t *testing.T) {
 			t.Fatal("vm-destroy must not run without confirm")
 		}
 	}
-	if _, o := run(t, d, "xenserver.vm.destroy", map[string]any{"uuid": "vm-uuid-1", "confirm": true}); o["success"] != true {
+	if p, _ := run(t, d, "xenserver.vm.destroy", map[string]any{"uuid": "vm-uuid-1", "confirm": true}); p.Status != protocol.StatusFailed ||
+		!strings.Contains(p.Message, "expected_name") {
+		t.Errorf("destroy without expected_name must be refused: %+v", p)
+	}
+	if p, _ := run(t, d, "xenserver.vm.destroy", map[string]any{"uuid": "vm-uuid-1", "confirm": true, "expected_name": "other-vm"}); p.Status != protocol.StatusFailed ||
+		!strings.Contains(p.Message, "not expected_name") {
+		t.Errorf("destroy with wrong expected_name must be refused: %+v", p)
+	}
+	for _, c := range xeCalls(t, log) {
+		if c[0] == "vm-destroy" {
+			t.Fatal("vm-destroy must not run without a matching expected_name")
+		}
+	}
+	if _, o := run(t, d, "xenserver.vm.destroy", map[string]any{"uuid": "vm-uuid-1", "confirm": true, "expected_name": "test-vm"}); o["success"] != true {
 		t.Errorf("confirmed destroy: %v", o)
 	}
 	if _, o := run(t, d, "xenserver.vm.pause", map[string]any{"uuid": "vm-uuid-1"}); o["success"] != true {

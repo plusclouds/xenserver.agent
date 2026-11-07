@@ -452,14 +452,18 @@ func (m *Module) VMClone(ctx context.Context, uuid, name, newName, description s
 
 // VMDestroy deletes a halted VM's record. Its disks (VDIs) are left on the SR
 // (xe vm-destroy semantics) and must be removed separately. Because this is
-// irreversible, confirm must be true; control domains are refused.
-func (m *Module) VMDestroy(ctx context.Context, uuid, name string, confirm bool) (*ActionResult, error) {
+// irreversible, confirm must be true and expectedName must equal the VM's
+// current name-label (guards against a wrong uuid); control domains are refused.
+func (m *Module) VMDestroy(ctx context.Context, uuid, name string, confirm bool, expectedName string) (*ActionResult, error) {
 	resolved, err := m.resolveVM(ctx, uuid, name)
 	if err != nil {
 		return nil, err
 	}
 	if !confirm {
 		return nil, fmt.Errorf("destroying VM %s is irreversible: pass confirm=true", resolved)
+	}
+	if expectedName == "" {
+		return nil, fmt.Errorf("destroying VM %s needs expected_name: the VM's exact current name-label", resolved)
 	}
 	out, lerr := m.run(ctx, "vm-list", "uuid="+resolved, "params=name-label,power-state,is-control-domain")
 	if lerr != nil {
@@ -471,6 +475,10 @@ func (m *Module) VMDestroy(ctx context.Context, uuid, name string, confirm bool)
 	}
 	if b[0]["is-control-domain"] == "true" {
 		return nil, fmt.Errorf("refusing to destroy control domain %s", resolved)
+	}
+	if b[0]["name-label"] != expectedName {
+		return nil, fmt.Errorf("refusing to destroy VM %s: its name-label is %q, not expected_name %q",
+			resolved, b[0]["name-label"], expectedName)
 	}
 	if _, err := m.run(ctx, "vm-destroy", "uuid="+resolved); err != nil {
 		r := m.failure("vm-destroy", resolved, err)

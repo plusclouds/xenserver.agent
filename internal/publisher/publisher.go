@@ -449,7 +449,7 @@ var operationCatalog = map[string]protocol.OperationSchema{
 	},
 	"xenserver.vm.destroy": {
 		Operation:   "xenserver.vm.destroy",
-		Description: "Delete a halted VM's record. IRREVERSIBLE; requires confirm=true. Its disks stay on the SR and must be removed separately. Control domains are refused.",
+		Description: "Delete a halted VM's record. IRREVERSIBLE; requires confirm=true and expected_name equal to the VM's current name-label (refused on mismatch). Its disks stay on the SR and must be removed separately. Control domains are refused.",
 		Params: append(append([]protocol.OperationParam{}, vmIdentifierParams...),
 			protocol.OperationParam{Name: "confirm", Type: "boolean", Required: true, Description: "Must be true."}),
 	},
