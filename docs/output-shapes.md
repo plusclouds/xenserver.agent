@@ -37,6 +37,8 @@ Fields callers commonly need (xe names, all in `params` unless noted):
 | pbd | `uuid`, `sr-uuid`, `host-uuid`, `currently-attached`, map `device-config` (secrets masked) |
 | vm | `uuid`, `name-label`, `power-state`, `VCPUs-max`, `VCPUs-at-startup`, `memory-static-max`, `memory-dynamic-max`, `memory-actual`, `is-a-snapshot`, `is-a-template`, `is-control-domain`, `HVM-boot-policy`, `PV-drivers-detected`, `resident-on`, maps `other-config`, `platform`, `xenstore-data`; sets `VIFs`, `VBDs`, `allowed-operations` |
 
+`vm.param_list` (and `inventory.snapshot` with `include_vms`) also include a `VIFs` set with the VM's network card uuids. XenServer's own `vm-param-list` does not print one, so the agent adds it; for card details use `vif.list`.
+
 Host **uptime** is not an xe field: use `system.info` (`uptime`, `boot_time`) on the same agent, or `other-config:boot_time` of the host.
 
 ## Summary shapes

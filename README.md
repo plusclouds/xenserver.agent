@@ -159,8 +159,9 @@ The generated reference, [docs/operations.md](docs/operations.md), lists every o
 | **VM lifecycle** | `vm.start/shutdown/reboot/force_shutdown/force_reboot/suspend/resume/pause/unpause`, `vm.create/clone/destroy`, `vm.param_set/param_get/param_list`, `vm.memory_limits_set` |
 | **Disks** | `vdi.create/destroy/resize/clone/copy/export/param_list`, `vbd.create/plug/unplug/destroy/param_list`, `vm.cd_list/cd_add/cd_insert/cd_eject/cd_remove` |
 | **Network cards and networks** | `vif.create/plug/unplug/remove/set_network/set_acl/param_set/param_list`, `network.create/destroy/param_list`, `vlan.create/destroy/param_list`, `pif.unplug/param_list/param_get` |
-| **Storage** | `sr.create/remove/scan/set_default/param_list/param_get`, `pbd.param_list`, `nfsmount.mount/unmount/list/list_files` |
+| **Storage** | `sr.create/remove/scan/set_default/param_list/param_get`, `pbd.param_list`, `nfsmount.mount/unmount/list/list_files`, `iso.create/remove` (config-drive ISOs in an ISO library) |
 | **Backup and restore** | `vm.snapshot_create/snapshot_delete/snapshot_promote/snapshot_export`, `vm.export/import`, `vm.promote_template`, `vdi.export/copy/clone` |
+| **Bulk read** | `inventory.snapshot` (pool, hosts, interfaces, networks, VLANs, SRs, attachments, optionally VMs, in one call) |
 | **Performance** | `ipmi.sensors`, `metrics.rrd` |
 | **Open vSwitch** | `openvswitch.bridge.list`, `port.list`, `flow.list`, `vxlan.create/remove`, `flow.add/remove` |
 
@@ -204,7 +205,7 @@ Long operations (`xenserver.vm.snapshot_export`, `vm.export`, `vm.import`, `vdi.
 → 202 {"status":"accepted","output":{"job_id":"…","status":"running",…}}
 ```
 
-Poll `agent.job.status` with the `job_id`. Exports report `progress.bytes_done` against an estimated `bytes_total`, so `percent` is indicative and capped at 99 until the job finishes. `agent.job.cancel` stops a job and removes a half-written export. Jobs are held in memory: they are lost on agent restart, and a job running at shutdown is cancelled. At most `agent.max_jobs` (default 2) run at once. Details and a restore walkthrough: [docs/backups.md](docs/backups.md).
+Poll `agent.job.status` with the `job_id`, or have the agent report the result itself with `params.callback` (see [docs/https-api.md](docs/https-api.md#completion-callbacks)). Exports report `progress.bytes_done` against an estimated `bytes_total`, so `percent` is indicative and capped at 99 until the job finishes. `agent.job.cancel` stops a job and removes a half-written export. Jobs are held in memory: they are lost on agent restart, and a job running at shutdown is cancelled. At most `agent.max_jobs` (default 2) run at once. Details and a restore walkthrough: [docs/backups.md](docs/backups.md).
 
 ---
 
@@ -266,6 +267,7 @@ agent:
   telemetry_interval: 30s             # changeable at runtime via telemetry.set_interval
   dry_run: false                      # true = validate only, execute nothing (see Dry-run mode)
   max_jobs: 2                         # concurrent background (async) jobs
+  callback_allowed_urls: []           # https URL prefixes async jobs may report to (empty = off)
   allowed_operations:
     - agent.allowed_operations
     - services.list
@@ -374,6 +376,8 @@ agent:
     # - xenserver.vif.remove
     # - xenserver.vif.set_acl
     # - xenserver.vm.import
+    # - xenserver.iso.create
+    # - xenserver.iso.remove
     # - xenserver.vm.export
     # - xenserver.vdi.copy
     # - xenserver.vdi.resize
@@ -395,6 +399,7 @@ xenserver:
   inventory_path: /etc/xensource-inventory
   xapi_socket_path: /var/lib/xcp/xapi
   ipmi_binary: /usr/bin/ipmitool
+  iso_binary: /usr/bin/genisoimage    # builds config-drive ISOs (xenserver.iso.create)
   events_enabled: false               # long-poll XAPI's event bus, streaming changes
   events_poll_interval: 10s
   ipmi_enabled: false                 # periodic IPMI sensor push

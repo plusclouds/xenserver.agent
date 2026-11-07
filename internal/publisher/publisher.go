@@ -649,10 +649,11 @@ var operationCatalog = map[string]protocol.OperationSchema{
 	},
 	"xenserver.vm.import": {
 		Operation:   "xenserver.vm.import",
-		Description: "Import a VM from a local .xva/.ova file (typically staged via nfsmount.mount).",
+		Description: "Import a VM from a local .xva/.ova file (typically staged via nfsmount.mount). The file and SR are checked first, so a bad path or SR fails at once. Returns data.uuid of the imported VM (or template, for a snapshot export), also in the async job result. Supports async.",
 		Params: []protocol.OperationParam{
-			{Name: "filename", Type: "string", Required: true, Description: "Path to the VM export file."},
-			{Name: "sr_uuid", Type: "string", Required: false, Description: "Target SR for the imported VM's disks."},
+			{Name: "filename", Type: "string", Required: true, Description: "Absolute path to the VM export file; it must exist."},
+			{Name: "sr_uuid", Type: "string", Required: false, Description: "Target SR for the imported VM's disks; must exist on this host."},
+			{Name: "new_name", Type: "string", Required: false, Description: "Name-label to set right after the import (data.renamed reports whether it applied)."},
 			{Name: "preserve", Type: "boolean", Required: false, Description: "Preserve the original MAC addresses and uuids."},
 		},
 	},
@@ -820,6 +821,9 @@ func init() {
 			s.Params = append(append([]protocol.OperationParam{}, s.Params...), protocol.OperationParam{
 				Name: "async", Type: "boolean", Required: false,
 				Description: "Run in the background: reply immediately with a job_id and poll agent.job.status for progress.",
+			}, protocol.OperationParam{
+				Name: "callback", Type: "object", Required: false,
+				Description: "With async: {\"url\":\"https://...\",\"token\":\"...\"}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too.",
 			})
 			operationCatalog[op] = s
 		}

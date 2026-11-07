@@ -65,7 +65,7 @@ A snapshot export imports as a **template**; promote it to a VM:
 4. xenserver.vm.start             {"uuid":"<new-vm>"}
 ```
 
-A whole-VM export (`vm.export`) imports as a VM directly. This round trip (snapshot export, import, promote, boot) is tested against a real XenServer 8.2 host.
+A whole-VM export (`vm.export`) imports as a VM directly. `vm.import` checks that the file and SR exist before starting, returns the new uuid in `data.uuid` (also in the async job result) and can name it with `new_name`. `nfsmount.mount` is idempotent: mounting the same export again succeeds, a different export at the same mount point is refused. This round trip (snapshot export, import, promote, boot) is tested against a real XenServer 8.2 host.
 
 `xenserver.vm.import` with `preserve: true` keeps the original MAC addresses; leave it off when restoring next to the original to avoid duplicates.
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"runtime"
 	"slices"
@@ -29,19 +30,22 @@ import (
 
 // Dispatcher routes command envelopes to the appropriate module method.
 type Dispatcher struct {
-	sys             *system.Module
-	svc             services.Manager
-	exec            *executor.Executor
-	xen             *xenserver.Module
-	ovs             *openvswitch.Module
-	nfs             *nfsmount.Module
-	pub             *publisher.Publisher
-	allowedOps      map[string]bool
-	allowedCommands []string
-	agentUUID       string
-	logger          *zap.Logger
-	jobs            *jobs.Manager
-	dryRun          bool
+	sys                *system.Module
+	svc                services.Manager
+	exec               *executor.Executor
+	xen                *xenserver.Module
+	ovs                *openvswitch.Module
+	nfs                *nfsmount.Module
+	pub                *publisher.Publisher
+	allowedOps         map[string]bool
+	allowedCommands    []string
+	agentUUID          string
+	logger             *zap.Logger
+	jobs               *jobs.Manager
+	dryRun             bool
+	callbackPrefixes   []string
+	callbackClient     *http.Client
+	callbackRetryDelay time.Duration
 }
 
 // SetJobs enables background execution (params.async) and the agent.job.*
@@ -215,6 +219,10 @@ type params struct {
 	IsControlDom  *bool             `json:"is_control_domain"`
 	IsATemplate   *bool             `json:"is_a_template"`
 	IncludeVMs    bool              `json:"include_vms"`
+	Callback      *callbackParam    `json:"callback"`
+	Files         map[string]string `json:"files"`
+	VolumeLabel   string            `json:"volume_label"`
+	Overwrite     bool              `json:"overwrite"`
 	Fields        []string          `json:"fields"`
 	PIFUUID       string            `json:"pif_uuid"`
 	Tag           int               `json:"tag"`
@@ -311,14 +319,23 @@ func (d *Dispatcher) startAsync(env protocol.Envelope, op string, p params, star
 		d.logResult(env.ID, op, protocol.StatusRejected, "jobs disabled", time.Since(start))
 		return d.reject(env, "background jobs are not enabled on this agent")
 	}
-	job, err := d.jobs.Start(op, func(ctx context.Context) (any, bool, string, error) {
+	if err := d.checkCallback(p.Callback); err != nil {
+		d.logResult(env.ID, op, protocol.StatusRejected, err.Error(), time.Since(start))
+		return d.reject(env, err.Error())
+	}
+	var onFinish func(jobs.Job)
+	if p.Callback != nil {
+		cb := *p.Callback
+		onFinish = func(j jobs.Job) { d.sendCallback(cb, j) }
+	}
+	job, err := d.jobs.StartWith(op, func(ctx context.Context) (any, bool, string, error) {
 		out, err := d.run(ctx, op, p)
 		if err != nil {
 			return nil, false, "", err
 		}
 		failed, msg := logicalFailure(out)
 		return out, failed, msg, nil
-	})
+	}, onFinish)
 	if err != nil {
 		d.logResult(env.ID, op, protocol.StatusFailed, err.Error(), time.Since(start))
 		return d.fail(env, err.Error())
@@ -680,6 +697,10 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 			return nil, err
 		}
 		return d.xen.ObjectParamGet(ctx, "sr", sr, p.Param, p.ParamKey)
+	case "xenserver.iso.create":
+		return d.xen.ISOCreate(ctx, p.SRUUID, p.Name, p.Files, p.VolumeLabel, p.Overwrite)
+	case "xenserver.iso.remove":
+		return d.xen.ISORemove(ctx, p.SRUUID, p.Name, p.Confirm)
 	case "xenserver.inventory.snapshot":
 		return d.xen.InventorySnapshot(ctx, p.IncludeVMs)
 	case "xenserver.host.param_list":
@@ -717,7 +738,7 @@ func (d *Dispatcher) run(ctx context.Context, op string, p params) (any, error) 
 	case "xenserver.vif.set_acl":
 		return d.xen.VIFSetACL(ctx, p.VIFUUID, p.UUID, p.Name, p.Device, p.LockingMode, p.IPv4Allowed, p.IPv6Allowed)
 	case "xenserver.vm.import":
-		return d.xen.VMImport(ctx, p.Filename, p.SRUUID, p.Preserve)
+		return d.xen.VMImport(ctx, p.Filename, p.SRUUID, p.Preserve, p.NewName)
 	case "xenserver.vm.export":
 		return d.xen.VMExport(ctx, p.UUID, p.Name, p.Filename, p.Compress)
 	case "xenserver.vdi.copy":

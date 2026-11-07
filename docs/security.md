@@ -15,6 +15,8 @@ The agent can start, stop and delete virtual machines and run commands as root, 
 | **NATS** | Outbound-only connection, per-agent scoped JWT, revocable on the platform |
 | **Secret masking** | Passwords, secrets, tokens, SR device-config and `xenstore-data` values are masked in logs, error output and parameter listings |
 | **Child processes** | Anything the agent launches dies with it, and hung commands are terminated after a timeout |
+| **Callbacks** | Async-job callbacks are off unless `agent.callback_allowed_urls` lists https prefixes; other URLs are refused, so the agent cannot be used to reach arbitrary hosts. Callback tokens are masked in logs |
+| **Config-drive ISOs** | `iso.create` writes only into an ISO library, with validated flat file names, size limits and no overwrite unless asked; file contents are never logged |
 | **Dry-run** | `agent.dry_run: true` validates requests without executing them |
 
 ## Hardening checklist

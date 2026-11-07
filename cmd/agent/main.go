@@ -123,6 +123,7 @@ func run(_ *cobra.Command, _ []string) error {
 	sysMod := system.New(iso)
 	exec := executor.New(logger, cfg.Agent.DryRun)
 	xenMod := xenserver.New(exec, cfg.XenServer.XEBinary, cfg.XenServer.InventoryPath, cfg.XenServer.XAPISocketPath, cfg.XenServer.IPMIBinary, logger)
+	xenMod.SetISOBinary(cfg.XenServer.ISOBinary)
 	ovsMod := openvswitch.New(exec, cfg.OpenVSwitch.VSCtlBinary, cfg.OpenVSwitch.OfctlBinary, cfg.XenServer.XEBinary, logger)
 	nfsMod := nfsmount.New(exec, cfg.NFSMount.MountBinary, cfg.NFSMount.UmountBinary, logger)
 	logger.Info("modules initialised",
@@ -165,6 +166,7 @@ func run(_ *cobra.Command, _ []string) error {
 	jobMgr := jobs.New(logger, cfg.Agent.MaxJobs, 100)
 	defer jobMgr.Shutdown()
 	disp.SetDryRun(cfg.Agent.DryRun)
+	disp.SetCallbackAllowedURLs(cfg.Agent.CallbackAllowedURLs)
 	disp.SetJobs(jobMgr)
 
 	// ------------------------------------------------------------------ //

@@ -134,6 +134,9 @@ func (m *Module) VIFCreate(ctx context.Context, vmUUID, vmName, device, networkU
 	if err != nil {
 		return nil, err
 	}
+	if out, nerr := m.run(ctx, "network-list", "uuid="+net, "--minimal"); nerr != nil || strings.TrimSpace(out) == "" {
+		return nil, fmt.Errorf("network %s does not exist on this host; list the available networks with xenserver.network.list", net)
+	}
 	args := []string{"vif-create", "vm-uuid=" + vm, "network-uuid=" + net, "device=" + device}
 	if mac != "" {
 		mac = strings.ToLower(mac)

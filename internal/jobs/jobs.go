@@ -133,6 +133,12 @@ func InJob(ctx context.Context) bool {
 
 // Start launches fn in the background and returns the new job's snapshot.
 func (m *Manager) Start(operation string, fn Func) (Job, error) {
+	return m.StartWith(operation, fn, nil)
+}
+
+// StartWith is Start with a hook called once with the finished job (after its
+// slot is released), for example to notify a caller.
+func (m *Manager) StartWith(operation string, fn Func, onFinish func(Job)) (Job, error) {
 	m.mu.Lock()
 	if m.running >= m.maxRun {
 		m.mu.Unlock()
@@ -179,6 +185,9 @@ func (m *Manager) Start(operation string, fn Func) (Job, error) {
 		m.mu.Unlock()
 		m.logger.Info("background job finished",
 			zap.String("job_id", j.data.ID), zap.String("operation", operation), zap.String("status", status))
+		if onFinish != nil {
+			onFinish(j.snapshot())
+		}
 	}()
 	return j.snapshot(), nil
 }

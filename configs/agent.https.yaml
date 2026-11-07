@@ -172,6 +172,8 @@ agent:
     # - xenserver.vif.remove
     # - xenserver.vif.set_acl
     # - xenserver.vm.import
+    # - xenserver.iso.create
+    # - xenserver.iso.remove
     # - xenserver.vm.export
     # - xenserver.vdi.copy
     # - xenserver.vdi.resize
@@ -186,6 +188,11 @@ agent:
 
   # When "exec" is listed above, only these exact binary paths may be invoked.
   # Requests referencing unlisted paths are rejected.
+  # Async jobs may report their result to these https URL prefixes
+  # (params.callback). Empty = callbacks disabled.
+  # callback_allowed_urls:
+  #   - https://platform.example.com/api/agent-callbacks/
+
   allowed_commands:
     - /usr/bin/journalctl
     - /usr/bin/df
@@ -199,6 +206,7 @@ xenserver:
   inventory_path: /etc/xensource-inventory
   xapi_socket_path: /var/lib/xcp/xapi
   ipmi_binary: /usr/bin/ipmitool
+  iso_binary: /usr/bin/genisoimage    # builds config-drive ISOs (xenserver.iso.create)
 
   # Replaces the events.py sidecar script: long-polls XAPI's own event bus
   # and streams every VM/SR/host/... change to the platform as it happens.

@@ -104,13 +104,18 @@ Set its mode to `0600`.
 
 At least one transport must be enabled or the agent refuses to start. See the [README](../README.md) for the full configuration reference and [https-api.md](https-api.md) for HTTPS details.
 
+### Optional tools
+
+- `xenserver.iso.create` needs `genisoimage` (or `mkisofs`) on the host; set `xenserver.iso_binary` if it lives elsewhere. Without it the operation fails with a clear message.
+- Callbacks need `agent.callback_allowed_urls` (see [https-api.md](https-api.md#completion-callbacks)).
+
 ### Enable only what you need
 
 State-changing operations ship commented out. Uncomment the ones your platform uses under `agent.allowed_operations` and restart. A hardened default for a monitoring-only host is the sample's read-only set.
 
 ### systemd sandbox
 
-The sample unit sets `ProtectSystem=strict`, so the agent can write only to `/var/log/plusclouds`, `/etc/plusclouds` and `/var/lib/plusclouds` (logs, config, TLS material). If exports or imports target another directory (for example an NFS mount under `/mnt`) and fail with a read-only file system error, add that path to `ReadWritePaths=` in the unit, then `systemctl daemon-reload` and restart.
+The sample unit sets `ProtectSystem=strict`, so the agent can write only to `/var/log/plusclouds`, `/etc/plusclouds`, `/var/lib/plusclouds` (logs, config, TLS material) and `/run/sr-mount` (ISO libraries, for `xenserver.iso.create`). If exports or imports target another directory (for example an NFS mount under `/mnt`) and fail with a read-only file system error, add that path to `ReadWritePaths=` in the unit, then `systemctl daemon-reload` and restart.
 
 ## Verifying
 

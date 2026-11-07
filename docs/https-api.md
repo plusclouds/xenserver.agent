@@ -154,6 +154,28 @@ Poll it:
 
 `status` is `running`, `completed`, `failed` or `cancelled`. When it finishes, `result` holds the operation's normal output; on failure `error` explains. `agent.job.list` shows recent jobs and `agent.job.cancel` stops one and removes a half-written export. Jobs live in memory and are lost if the agent restarts. Only `agent.max_jobs` (default 2) run at once. See [backups.md](backups.md).
 
+## Completion callbacks
+
+Instead of polling, an async call can ask the agent to report the final result to your server:
+
+```json
+{"operation":"xenserver.vm.import",
+ "params":{"filename":"/mnt/repo/image.xva","sr_uuid":"<sr>","new_name":"vm-123","async":true,
+           "callback":{"url":"https://platform.example.com/api/agent-callbacks/vm-123","token":"<bearer token>"}}}
+```
+
+When the job ends the agent POSTs JSON to that URL, with `Authorization: Bearer <token>`:
+
+```json
+{"agent_uuid":"…","job_id":"…","operation":"xenserver.vm.import","status":"completed",
+ "error":"","elapsed_s":412.3,"result":{"operation":"vm-import","success":true,"data":{"uuid":"<new-vm>","renamed":true}}}
+```
+
+- Delivery is retried up to 4 times with growing delays; any 2xx counts as delivered. A failed callback never affects the job: `agent.job.status` always has the result. Treat callbacks as a hint and make your handler idempotent.
+- **Off by default.** The agent only calls URLs under a prefix listed in `agent.callback_allowed_urls`, and only over `https` without credentials in the URL; anything else is rejected before the job starts. This stops callers from using the agent to reach arbitrary addresses.
+- The `token` is masked in logs. Certificates are verified normally (the agent trusts the host's CA store).
+- A job that is cancelled or fails still calls back, with `status` `cancelled` or `failed`. Jobs lost to an agent restart do not call back.
+
 ## Dry run
 
 With `agent.dry_run: true` the same calls are authenticated and validated but never executed; the reply has `"dry_run": true, "executed": false`. Useful to test an integration against a live host safely.

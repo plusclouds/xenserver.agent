@@ -24,7 +24,7 @@ Reply: an envelope whose `payload` is
 - Every operation must be listed in the host's `allowed_operations`. Destructive ones (`*.destroy`, `unplug`) also need `confirm: true`.
 - `uuid`/`name` selectors: most VM operations take `uuid` or `name` (name must match exactly one VM).
 
-119 operations.
+121 operations.
 
 ### `agent.allowed_operations`
 
@@ -322,6 +322,28 @@ Read the current IPMI sensor table (ipmitool sensor): name, reading, units, stat
 |---|---|---|---|
 | `units` | array | no | Only sensors with these units: "degrees C", "RPM", "Watts", "Volts", "Amps", "percent", "discrete". |
 
+### `xenserver.iso.create`
+
+Build a small ISO (for example a cloud-init config drive with volume label cidata) from the given files and store it in an ISO storage repository, then rescan the SR. Returns data.vdi_uuid. Attach it with xenserver.vm.cd_add / cd_insert.
+
+| param | type | required | description |
+|---|---|---|---|
+| `sr_uuid` | string | **yes** | ISO storage repository (type iso) to write into. |
+| `name` | string | **yes** | ISO file name; .iso is appended if missing. |
+| `files` | object | **yes** | Map of file name to text content, e.g. {"user-data":"...","meta-data":"...","network-config":"..."}. Up to 32 files, 1 MiB each, 4 MiB total; flat names only. |
+| `volume_label` | string | no | ISO volume label (default cidata). |
+| `overwrite` | boolean | no | Replace an existing ISO of the same name (default: refused). |
+
+### `xenserver.iso.remove`
+
+Delete an ISO from an ISO storage repository and rescan it. IRREVERSIBLE; requires confirm=true; refused while the ISO is inserted in a running VM.
+
+| param | type | required | description |
+|---|---|---|---|
+| `sr_uuid` | string | **yes** | ISO storage repository. |
+| `name` | string | **yes** | ISO file name. |
+| `confirm` | boolean | **yes** | Must be true. |
+
 ### `xenserver.metrics.rrd`
 
 Return the latest XAPI RRD-derived utilisation snapshot: host metrics (cpu, memory, disk, network) and, per VM, cpu0..N, memory, memory_internal_free, vbd_*_iops/latency/throughput and vif_*_rx/tx. Give uuid to get only that VM (the host block is then omitted). Pass since (Unix time) to choose the window start; only its newest sample is returned, so poll with end_time+1 to build a series. Values are 60 s averages.
@@ -500,6 +522,7 @@ Rescan an SR so new or removed disks appear. Can be slow; use async.
 | `uuid` | string | no | SR uuid. Either uuid or name is required. |
 | `name` | string | no | SR name-label. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.sr.set_default`
 
@@ -582,6 +605,7 @@ Create a fast copy-on-write clone of a VDI within the same SR.
 |---|---|---|---|
 | `vdi_uuid` | string | **yes** | VDI uuid to clone. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vdi.copy`
 
@@ -592,6 +616,7 @@ Copy a VDI's data to another (possibly different) SR.
 | `vdi_uuid` | string | **yes** | Source VDI uuid. |
 | `sr_uuid` | string | **yes** | Destination SR uuid. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vdi.create`
 
@@ -627,6 +652,7 @@ Export a single VDI's raw disk content to a local file via xapi's HTTP export in
 | `filename` | string | **yes** | Destination path for the exported disk data. |
 | `format` | string | no | Export format: vhd (default) or raw. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vdi.list`
 
@@ -857,6 +883,7 @@ Clone a VM (copy-on-write where the SR supports it). The source must be halted o
 | `new_name` | string | **yes** | Name-label of the clone. |
 | `description` | string | no | Name-description of the clone. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vm.console_list`
 
@@ -878,6 +905,7 @@ Create a VM. With template (uuid or name-label) it installs a new VM from that t
 | `template` | string | no | Template uuid or name-label to install from. |
 | `sr_uuid` | string | no | SR for the new VM's disks when installing from a template. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vm.destroy`
 
@@ -909,6 +937,7 @@ Export a whole VM (metadata + every attached VDI) to a local .xva file.
 | `filename` | string | **yes** | Destination path for the .xva file. |
 | `compress` | boolean | no | Compress the export. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vm.force_reboot`
 
@@ -939,14 +968,16 @@ Return the detailed record for one VM.
 
 ### `xenserver.vm.import`
 
-Import a VM from a local .xva/.ova file (typically staged via nfsmount.mount).
+Import a VM from a local .xva/.ova file (typically staged via nfsmount.mount). The file and SR are checked first, so a bad path or SR fails at once. Returns data.uuid of the imported VM (or template, for a snapshot export), also in the async job result. Supports async.
 
 | param | type | required | description |
 |---|---|---|---|
-| `filename` | string | **yes** | Path to the VM export file. |
-| `sr_uuid` | string | no | Target SR for the imported VM's disks. |
+| `filename` | string | **yes** | Absolute path to the VM export file; it must exist. |
+| `sr_uuid` | string | no | Target SR for the imported VM's disks; must exist on this host. |
+| `new_name` | string | no | Name-label to set right after the import (data.renamed reports whether it applied). |
 | `preserve` | boolean | no | Preserve the original MAC addresses and uuids. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vm.list`
 
@@ -1078,6 +1109,7 @@ Export a snapshot as a portable .xva image file (metadata plus all disks) — th
 | `name` | string | no | Snapshot name-label. Must resolve to exactly one snapshot. |
 | `filename` | string | **yes** | Absolute path of the .xva file to create, e.g. on a mounted NFS repository. |
 | `async` | boolean | no | Run in the background: reply immediately with a job_id and poll agent.job.status for progress. |
+| `callback` | object | no | With async: {"url":"https://...","token":"..."}. When the job ends the agent POSTs {agent_uuid, job_id, operation, status, error, elapsed_s, result} to the URL with the token as a bearer header (retried up to 4 times). The URL must be under an agent.callback_allowed_urls prefix; otherwise the request is rejected. Polling agent.job.status always works too. |
 
 ### `xenserver.vm.snapshot_list`
 

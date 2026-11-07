@@ -33,6 +33,16 @@ func init() {
 			param("network_name", "string", false, "Network name-label."),
 			param("mac", "string", false, "MAC address aa:bb:cc:dd:ee:ff (generated if omitted)."),
 			param("mtu", "integer", false, "MTU 68-9216."))...)
+	add("xenserver.iso.create", "Build a small ISO (for example a cloud-init config drive with volume label cidata) from the given files and store it in an ISO storage repository, then rescan the SR. Returns data.vdi_uuid. Attach it with xenserver.vm.cd_add / cd_insert.",
+		param("sr_uuid", "string", true, "ISO storage repository (type iso) to write into."),
+		param("name", "string", true, "ISO file name; .iso is appended if missing."),
+		param("files", "object", true, "Map of file name to text content, e.g. {\"user-data\":\"...\",\"meta-data\":\"...\",\"network-config\":\"...\"}. Up to 32 files, 1 MiB each, 4 MiB total; flat names only."),
+		param("volume_label", "string", false, "ISO volume label (default cidata)."),
+		param("overwrite", "boolean", false, "Replace an existing ISO of the same name (default: refused)."))
+	add("xenserver.iso.remove", "Delete an ISO from an ISO storage repository and rescan it. IRREVERSIBLE; requires confirm=true; refused while the ISO is inserted in a running VM.",
+		param("sr_uuid", "string", true, "ISO storage repository."),
+		param("name", "string", true, "ISO file name."),
+		param("confirm", "boolean", true, "Must be true."))
 	add("xenserver.inventory.snapshot", "One-call read of the host and pool: pool (with host_count/is_pool_member), hosts, pifs, networks, vlans, srs and pbds, each as the full xe parameter list ({uuid, params, maps, sets}, xe-style keys, secrets masked). Optionally the guest VMs too.",
 		param("include_vms", "boolean", false, "Also include every guest VM's full parameter list (excludes control domains, templates and snapshots)."))
 	add("xenserver.vif.plug", "Hot-attach a network card to a running VM (needs guest tools). Create it first with xenserver.vif.create.", vifSel...)
