@@ -909,7 +909,7 @@ Create a VM. With template (uuid or name-label) it installs a new VM from that t
 
 ### `xenserver.vm.destroy`
 
-Delete a halted VM's record. IRREVERSIBLE; requires confirm=true. Its disks stay on the SR and must be removed separately. Control domains are refused.
+Delete a halted VM's record. IRREVERSIBLE; requires confirm=true and expected_name equal to the VM's current name-label (refused on mismatch). Its disks stay on the SR and must be removed separately. Control domains are refused.
 
 | param | type | required | description |
 |---|---|---|---|
