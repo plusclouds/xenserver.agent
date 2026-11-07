@@ -205,7 +205,7 @@ func TestAsyncCallback(t *testing.T) {
 	// Outside the allowlist and non-https: refused.
 	for _, u := range []string{"https://evil.example/done", "http://127.0.0.1/done",
 		srv.URL + ".evil.net/done", "https://user:pw@" + strings.TrimPrefix(srv.URL, "https://") + "/done",
-		srv.URL + "/api/cb/../admin", srv.URL + "/api/cbx/done", srv.URL + "/", srv.URL} {
+		srv.URL + "/api/cb/../admin", srv.URL + "/api/cb/%2e%2e/admin", srv.URL + "/api/cb//x", srv.URL + "/api/cb/./x", srv.URL + "/api/cb/x#frag", srv.URL + "/api/cb/%41", srv.URL + "/api/cbx/done", srv.URL + "/", srv.URL} {
 		if p, _ := decode(t, e.d.Dispatch(context.Background(), cmd(map[string]any{"url": u}))); p.Status != protocol.StatusRejected {
 			t.Fatalf("%s: want rejected, got %s", u, p.Status)
 		}

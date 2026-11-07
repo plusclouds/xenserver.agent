@@ -172,7 +172,7 @@ When the job ends the agent POSTs JSON to that URL, with `Authorization: Bearer 
 ```
 
 - Delivery is retried up to 4 times with growing delays; any 2xx counts as delivered. A failed callback never affects the job: `agent.job.status` always has the result. Treat callbacks as a hint and make your handler idempotent.
-- **Off by default.** The agent only calls URLs under a prefix listed in `agent.callback_allowed_urls`, and only over `https` without credentials in the URL; anything else is rejected before the job starts. This stops callers from using the agent to reach arbitrary addresses.
+- **Off by default.** The agent only calls URLs under a prefix listed in `agent.callback_allowed_urls` (prefixes must be https and end in `/`), and only over `https`, with no credentials or fragment, and a plain path (no percent-encoding, `.`/`..` segments or `//`); the agent sends the validated URL, never the raw string, and does not follow redirects; anything else is rejected before the job starts. This stops callers from using the agent to reach arbitrary addresses.
 - The `token` is masked in logs. Certificates are verified normally (the agent trusts the host's CA store).
 - A job that is cancelled or fails still calls back, with `status` `cancelled` or `failed`. Jobs lost to an agent restart do not call back.
 

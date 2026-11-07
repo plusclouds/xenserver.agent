@@ -57,10 +57,19 @@ func (d *Dispatcher) checkCallback(cb *callbackParam) error {
 		return fmt.Errorf("callbacks are not enabled on this agent (agent.callback_allowed_urls is empty)")
 	}
 	u, err := url.Parse(cb.URL)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
-		return fmt.Errorf("callback url must be an https URL without credentials")
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Opaque != "" || u.Fragment != "" {
+		return fmt.Errorf("callback url must be an https URL without credentials or fragment")
 	}
-	reqPath := path.Clean("/" + u.Path)
+	// Validate exactly what will be sent: no percent-encoded path characters,
+	// no dot segments or doubled slashes, so every parser reads one path.
+	reqPath := u.Path
+	cleaned := path.Clean(reqPath)
+	if strings.HasSuffix(reqPath, "/") && cleaned != "/" {
+		cleaned += "/"
+	}
+	if reqPath == "" || u.RawPath != "" || cleaned != reqPath {
+		return fmt.Errorf("callback url path must be plain: no encoded characters, '.'/'..' segments or '//'")
+	}
 	if !strings.HasSuffix(reqPath, "/") {
 		reqPath += "/"
 	}
@@ -75,6 +84,8 @@ func (d *Dispatcher) checkCallback(cb *callbackParam) error {
 		if strings.EqualFold(strings.TrimSuffix(u.Hostname(), "."), strings.TrimSuffix(pu.Hostname(), ".")) &&
 			effectivePort(u) == effectivePort(pu) &&
 			strings.HasPrefix(reqPath, pu.Path) {
+			// Send the rebuilt URL, not the caller's string.
+			cb.URL = (&url.URL{Scheme: "https", Host: u.Host, Path: u.Path, RawQuery: u.RawQuery}).String()
 			return nil
 		}
 	}
