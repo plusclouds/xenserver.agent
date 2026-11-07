@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -32,6 +33,18 @@ func redactValue(v any) any {
 			secret := strings.Contains(lk, "password") || strings.Contains(lk, "secret") ||
 				strings.Contains(lk, "passwd") || strings.Contains(lk, "token") ||
 				strings.HasPrefix(lk, "xenstore-data:")
+			if lk == "files" {
+				// Config-drive file contents (user-data may hold passwords): log sizes only.
+				if fm, ok := val.(map[string]any); ok {
+					for name, c := range fm {
+						if cs, ok := c.(string); ok {
+							fm[name] = fmt.Sprintf("<%d bytes>", len(cs))
+						}
+					}
+					t[k] = fm
+					continue
+				}
+			}
 			if s, ok := val.(string); ok && secret && s != "" {
 				t[k] = "***"
 				continue

@@ -41,6 +41,7 @@ type Module struct {
 	exec         *executor.Executor
 	mountBinary  string
 	umountBinary string
+	procMounts   string
 	logger       *zap.Logger
 }
 
@@ -60,12 +61,27 @@ func (m *Module) Mount(ctx context.Context, server, exportPath, mountPoint, opti
 		return nil, err
 	}
 
+	source := server + ":" + exportPath
+	if mounts, lerr := m.List(ctx); lerr == nil {
+		for _, mi := range mounts {
+			if mi.MountPoint != filepath.Clean(mountPoint) {
+				continue
+			}
+			if mi.Server == server && strings.TrimRight(mi.ExportPath, "/") == strings.TrimRight(exportPath, "/") {
+				return &ActionResult{Operation: "mount", Target: mountPoint, Success: true,
+					Message: fmt.Sprintf("%s is already mounted at %s; nothing to do", source, mountPoint)}, nil
+			}
+			return &ActionResult{Operation: "mount", Target: mountPoint, Success: false,
+				Message: fmt.Sprintf("%s is already in use by a different mount (%s:%s); unmount it first or choose another mount point",
+					mountPoint, mi.Server, mi.ExportPath)}, nil
+		}
+	}
+
 	if err := os.MkdirAll(mountPoint, 0755); err != nil {
 		return &ActionResult{Operation: "mount", Target: mountPoint, Success: false,
 			Message: fmt.Sprintf("creating mount point: %s", err)}, nil
 	}
 
-	source := server + ":" + exportPath
 	args := []string{"-t", "nfs"}
 	if options != "" {
 		args = append(args, "-o", options)
@@ -91,8 +107,15 @@ func (m *Module) Unmount(ctx context.Context, mountPoint string) (*ActionResult,
 	}
 	_, stderr, err := m.exec.Execute(ctx, m.umountBinary, "--", mountPoint)
 	if err != nil {
-		return &ActionResult{Operation: "unmount", Target: mountPoint, Success: false,
-			Message: firstNonEmpty(strings.TrimSpace(stderr), err.Error())}, nil
+		msg := firstNonEmpty(strings.TrimSpace(stderr), err.Error())
+		low := strings.ToLower(msg)
+		switch {
+		case strings.Contains(low, "busy"):
+			msg = fmt.Sprintf("Cannot unmount %s: the mount is busy (an export or import is still using it, or a process has files open there). Wait for it to finish and retry. Details: %s", mountPoint, strings.TrimSpace(stderr))
+		case strings.Contains(low, "not mounted"):
+			msg = fmt.Sprintf("%s is not mounted; nothing to unmount.", mountPoint)
+		}
+		return &ActionResult{Operation: "unmount", Target: mountPoint, Success: false, Message: msg}, nil
 	}
 	return &ActionResult{Operation: "unmount", Target: mountPoint, Success: true,
 		Message: fmt.Sprintf("unmounted %s", mountPoint)}, nil
@@ -101,7 +124,11 @@ func (m *Module) Unmount(ctx context.Context, mountPoint string) (*ActionResult,
 // List returns every currently-mounted NFS filesystem, parsed from
 // /proc/mounts.
 func (m *Module) List(_ context.Context) ([]MountInfo, error) {
-	data, err := os.ReadFile("/proc/mounts")
+	path := m.procMounts
+	if path == "" {
+		path = "/proc/mounts"
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading /proc/mounts: %w", err)
 	}

@@ -193,7 +193,30 @@ func (m *Module) VMParamList(ctx context.Context, uuid, name string) (*ParamList
 	if err != nil {
 		return nil, err
 	}
-	return m.paramList(ctx, "vm", resolved)
+	pl, err := m.paramList(ctx, "vm", resolved)
+	if err != nil {
+		return nil, err
+	}
+	m.addVIFsSet(ctx, pl)
+	return pl, nil
+}
+
+// addVIFsSet adds a "VIFs" set (xe's vm-param-list does not print one on this
+// version) listing the VM's network card uuids, so callers get the same view
+// they have for VBDs.
+func (m *Module) addVIFsSet(ctx context.Context, pl *ParamList) {
+	if _, ok := pl.Sets["VIFs"]; ok {
+		return
+	}
+	out, err := m.run(ctx, "vif-list", "vm-uuid="+pl.UUID, "params=uuid", "--minimal")
+	if err != nil {
+		return
+	}
+	vifs := splitMinimalList(out)
+	if vifs == nil {
+		vifs = []string{}
+	}
+	pl.Sets["VIFs"] = vifs
 }
 
 // paramList runs "xe <class>-param-list" and structures the output.

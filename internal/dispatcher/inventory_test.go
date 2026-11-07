@@ -28,6 +28,7 @@ case "$cmd" in
   pbd-list)
     printf 'uuid ( RO)           : pbd-1\n       device-config (MRO): server: nas; password: s3cret\n' ;;
   vm-list) printf 'uuid ( RO)           : vm-1\n' ;;
+  vif-list) printf 'uuid ( RO): vif-a\n      vm-uuid ( RO): vm-1\n\n\nuuid ( RO): vif-b\n      vm-uuid ( RO): vm-1\n' ;;
   *) echo "unhandled xe: $cmd" >&2; exit 1 ;;
 esac
 `
@@ -72,5 +73,9 @@ func TestInventorySnapshot(t *testing.T) {
 	_, out = decode(t, d.Dispatch(ctx, buildCommand(t, "xenserver.inventory.snapshot", map[string]any{"include_vms": true})))
 	if l, _ := out["vms"].([]any); len(l) != 1 {
 		t.Fatalf("vms: %v", out["vms"])
+	}
+	vifs, _ := out["vms"].([]any)[0].(map[string]any)["sets"].(map[string]any)["VIFs"].([]any)
+	if len(vifs) != 2 || vifs[0] != "vif-a" {
+		t.Fatalf("VIFs set: %v", vifs)
 	}
 }

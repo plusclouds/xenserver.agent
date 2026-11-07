@@ -78,5 +78,30 @@ func (m *Module) InventorySnapshot(ctx context.Context, includeVMs bool) (*Inven
 			return nil, err
 		}
 	}
+	if includeVMs {
+		m.attachVIFs(ctx, inv.VMs)
+	}
 	return inv, nil
+}
+
+// attachVIFs adds the synthetic "VIFs" set to each VM using one vif-list call.
+func (m *Module) attachVIFs(ctx context.Context, vms []ParamList) {
+	out, err := m.runTimeout(ctx, timeoutMedium, "vif-list", "params=uuid,vm-uuid")
+	if err != nil {
+		return
+	}
+	byVM := map[string][]string{}
+	for _, b := range parseXEBlocks(out) {
+		byVM[b["vm-uuid"]] = append(byVM[b["vm-uuid"]], b["uuid"])
+	}
+	for i := range vms {
+		if _, ok := vms[i].Sets["VIFs"]; ok {
+			continue
+		}
+		v := byVM[vms[i].UUID]
+		if v == nil {
+			v = []string{}
+		}
+		vms[i].Sets["VIFs"] = v
+	}
 }

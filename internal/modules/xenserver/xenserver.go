@@ -27,8 +27,16 @@ type Module struct {
 	inventoryPath  string
 	xapiSocketPath string
 	ipmiBinary     string
+	isoBinary      string
+	srMountDir     string
 	logger         *zap.Logger
 }
+
+// SetSRMountDir overrides where SR mounts live (default /run/sr-mount); for tests.
+func (m *Module) SetSRMountDir(dir string) { m.srMountDir = dir }
+
+// SetISOBinary sets the tool used by iso.create (genisoimage or mkisofs).
+func (m *Module) SetISOBinary(path string) { m.isoBinary = path }
 
 // New creates a xenserver Module.
 func New(exec *executor.Executor, xeBinary, inventoryPath, xapiSocketPath, ipmiBinary string, logger *zap.Logger) *Module {
@@ -851,11 +859,33 @@ func (m *Module) resolveTemplate(ctx context.Context, uuid, name string) (string
 	return uuid, nil
 }
 
-// VMImport imports a VM from a local file (typically staged via
-// internal/modules/nfsmount). No path confinement is applied.
-func (m *Module) VMImport(ctx context.Context, filename, srUUID string, preserve bool) (*ActionResult, error) {
+// VMImport imports a VM (or, for a snapshot export, a template) from a local
+// file, typically staged via internal/modules/nfsmount. The file and target SR
+// are checked first so a bad request fails at once rather than after a long
+// timeout. The new object's uuid is returned in Data.uuid (and Output). When
+// newName is set it is applied as the name-label right after the import.
+func (m *Module) VMImport(ctx context.Context, filename, srUUID string, preserve bool, newName string) (*ActionResult, error) {
 	if filename == "" {
 		return nil, fmt.Errorf("filename is required")
+	}
+	if !filepath.IsAbs(filename) {
+		return nil, fmt.Errorf("filename %q must be an absolute path", filename)
+	}
+	st, serr := os.Stat(filename)
+	switch {
+	case os.IsNotExist(serr):
+		return nil, fmt.Errorf("image file %s does not exist (is the repository mounted?)", filename)
+	case serr != nil:
+		return nil, fmt.Errorf("cannot read image file %s: %w", filename, serr)
+	case !st.Mode().IsRegular():
+		return nil, fmt.Errorf("%s is not a regular file", filename)
+	case st.Size() == 0:
+		return nil, fmt.Errorf("image file %s is empty", filename)
+	}
+	if srUUID != "" {
+		if out, err := m.run(ctx, "sr-list", "uuid="+srUUID, "--minimal"); err != nil || strings.TrimSpace(out) == "" {
+			return nil, fmt.Errorf("storage repository %s does not exist on this host", srUUID)
+		}
 	}
 	args := []string{"vm-import", "filename=" + filename}
 	if srUUID != "" {
@@ -865,18 +895,25 @@ func (m *Module) VMImport(ctx context.Context, filename, srUUID string, preserve
 		args = append(args, "preserve=true")
 	}
 	if jobs.InJob(ctx) {
-		var size int64
-		if st, serr := os.Stat(filename); serr == nil {
-			size = st.Size()
-		}
-		jobs.Report(ctx, 0, size, "importing "+filename+" (xe reports no import progress)")
+		jobs.Report(ctx, 0, st.Size(), "importing "+filename+" (xe reports no import progress)")
 	}
 	stdout, err := m.runTimeout(ctx, timeoutLong, args...)
 	if err != nil {
 		return m.failure("vm-import", filename, err), nil
 	}
-	return &ActionResult{Operation: "vm-import", Target: filename, Success: true,
-		Message: "VM imported successfully.", Output: strings.TrimSpace(stdout)}, nil
+	id := strings.TrimSpace(stdout)
+	res := &ActionResult{Operation: "vm-import", Target: filename, Success: true,
+		Message: "VM imported successfully.", Output: id, Data: map[string]any{"uuid": id}}
+	if newName != "" && id != "" {
+		if _, err := m.run(ctx, "vm-param-set", "uuid="+id, "name-label="+newName); err != nil {
+			res.Message = fmt.Sprintf("VM imported as %s, but renaming it to %q failed: %v", id, newName, err)
+			res.Data = map[string]any{"uuid": id, "renamed": false}
+		} else {
+			res.Message = fmt.Sprintf("VM imported and named %q.", newName)
+			res.Data = map[string]any{"uuid": id, "name_label": newName, "renamed": true}
+		}
+	}
+	return res, nil
 }
 
 // VMExport exports a whole VM (metadata + every attached VDI) to a local

@@ -114,6 +114,10 @@ type AgentConfig struct {
 	DryRun bool `mapstructure:"dry_run"`
 	// MaxJobs is how many background (params.async) jobs may run at once.
 	MaxJobs int `mapstructure:"max_jobs"`
+	// CallbackAllowedURLs lists URL prefixes that async jobs may report their
+	// result to (params.callback). Empty disables callbacks entirely. Use https
+	// prefixes; the agent refuses anything else.
+	CallbackAllowedURLs []string `mapstructure:"callback_allowed_urls"`
 }
 
 // ISOConfig holds ISO/config-drive settings.
@@ -159,6 +163,9 @@ type XenServerConfig struct {
 	// IPMIBinary is the path to the ipmitool binary, used for
 	// xenserver.ipmi.sensors and the periodic IPMI telemetry push.
 	IPMIBinary string `mapstructure:"ipmi_binary"`
+	// ISOBinary builds ISO images for xenserver.iso.create (genisoimage or
+	// mkisofs). Default /usr/bin/genisoimage.
+	ISOBinary string `mapstructure:"iso_binary"`
 	// EventsEnabled starts a background loop that long-polls XAPI's own
 	// event bus (event.from) and publishes each object-change event to the
 	// platform. Replaces the events.py sidecar script.
@@ -314,6 +321,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.allowed_commands", []string{})
 	v.SetDefault("agent.dry_run", false)
 	v.SetDefault("agent.max_jobs", 2)
+	v.SetDefault("xenserver.iso_binary", "/usr/bin/genisoimage")
 
 	v.SetDefault("iso.mount_path", "/media/plusclouds-config")
 	v.SetDefault("iso.fallback_env", true)
